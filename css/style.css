@@ -1,0 +1,1036 @@
+/* Tailwind-клас на кшталт .flex перебиває атрибут hidden, бо стилі автора
+   сильніші за стилі браузера. Через це loginScreen і app були видимі
+   одночасно. Правило робить атрибут hidden авторитетним — з ним
+   працює увесь код (el.hidden = true/false). */
+[hidden] {
+  display: none !important;
+}
+
+/* Акцент — фіолетовий, а не синій.
+ *
+ * Windows виділяє вибраний текст синім (#0078D4), і на синьому інтерфейсі
+ * не видно, де закінчилося виділення і почався елемент керування. Тому
+ * будь-який «синій як у Windows» тут не годиться: акцент має бути
+ * кольором, якого на виділці тексту не буває. */
+:root {
+  color-scheme: dark;
+  --app-bg: #0f172a;
+  --app-secondary-bg: #1e293b;
+  --app-text: #e8edf7;
+  --app-hint: #94a3b8;
+  --app-link: #c4b5fd;
+  --app-button: #7c3aed;
+  --app-button-text: #ffffff;
+  --app-section-bg: #172033;
+  --app-section-header-bg: #172033;
+  --app-border: color-mix(in srgb, var(--app-text) 12%, transparent);
+  --app-border-strong: color-mix(in srgb, var(--app-text) 20%, transparent);
+  --app-input-bg: color-mix(in srgb, var(--app-secondary-bg) 78%, var(--app-text) 3%);
+  --app-elevated: color-mix(in srgb, var(--app-secondary-bg) 94%, var(--app-text) 2%);
+  --app-ai: #a855f7;
+  --app-ai-2: #d946ef;
+  --app-success: #34d399;
+  --app-danger: #f87171;
+  --app-warning: #fbbf24;
+  --app-chrome: #0f172a;
+  --header-height: 76px;
+  --app-height: 100dvh;
+}
+
+[data-theme='light'] {
+  color-scheme: light;
+  --app-bg: #f8fafc;
+  --app-secondary-bg: #ffffff;
+  --app-text: #0f172a;
+  --app-hint: #64748b;
+  --app-link: #6d28d9;
+  --app-button: #6d28d9;
+  --app-button-text: #ffffff;
+  --app-section-bg: #ffffff;
+  --app-section-header-bg: #ffffff;
+  --app-success: #16a34a;
+  --app-danger: #dc2626;
+  --app-warning: #d97706;
+  --app-chrome: #f8fafc;
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+  --app-bg: #0f172a;
+  --app-secondary-bg: #1e293b;
+  --app-text: #e8edf7;
+  --app-hint: #94a3b8;
+  --app-link: #c4b5fd;
+  --app-button: #7c3aed;
+  --app-button-text: #ffffff;
+  --app-section-bg: #172033;
+  --app-section-header-bg: #172033;
+  --app-success: #34d399;
+  --app-danger: #f87171;
+  --app-warning: #fbbf24;
+  --app-chrome: #0f172a;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']) {
+    color-scheme: light;
+    --app-bg: #f8fafc;
+    --app-secondary-bg: #ffffff;
+    --app-text: #0f172a;
+    --app-hint: #64748b;
+    --app-link: #6d28d9;
+    --app-button: #6d28d9;
+    --app-button-text: #ffffff;
+    --app-section-bg: #ffffff;
+    --app-section-header-bg: #ffffff;
+    --app-success: #16a34a;
+    --app-danger: #dc2626;
+    --app-warning: #d97706;
+    --app-chrome: #f8fafc;
+  }
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100dvh;
+  min-height: 100dvh;
+  margin: 0;
+  overflow: hidden;
+  touch-action: manipulation;
+  overscroll-behavior: none;
+  background: var(--app-bg);
+  color: var(--app-text);
+}
+
+body {
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  accent-color: var(--app-button);
+}
+
+#app {
+  width: 100%;
+  height: 100dvh;
+  height: var(--app-height, 100dvh);
+  min-height: 0;
+  overscroll-behavior: none;
+}
+
+.chat-workspace {
+  min-height: 0;
+  height: 100%;
+  max-height: var(--app-height, 100dvh);
+  /* overflow:hidden тут не потрібен: #messages сам прокручується,
+     а цей контейнер лише обрізав би вміст разом із чатом. */
+  overflow: visible;
+}
+
+.header {
+  padding-top: max(0.75rem, env(safe-area-inset-top)) !important;
+  padding-left: max(0.75rem, env(safe-area-inset-left)) !important;
+  padding-right: max(0.75rem, env(safe-area-inset-right)) !important;
+}
+
+.footer {
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom)) !important;
+  padding-left: max(0.75rem, env(safe-area-inset-left)) !important;
+  padding-right: max(0.75rem, env(safe-area-inset-right)) !important;
+}
+
+.chat-messages {
+  min-height: 0;
+  flex: 1 1 0%;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+button,
+textarea,
+input,
+select {
+  font: inherit;
+}
+
+button:focus-visible,
+textarea:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--app-link) 32%, transparent);
+  outline-offset: 2px;
+}
+
+::selection {
+  /* Виділення тексту — навмисно не синє: так його не сплутати з
+     системним виділленням Windows, а ще й видно, що це наш застосунок. */
+  color: var(--app-button-text);
+  background: var(--app-button);
+}
+
+.safe-top {
+  padding-top: max(0.75rem, env(safe-area-inset-top)) !important;
+}
+
+.safe-bottom {
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom)) !important;
+}
+
+.safe-left {
+  padding-left: max(0.75rem, env(safe-area-inset-left)) !important;
+}
+
+.safe-right {
+  padding-right: max(0.75rem, env(safe-area-inset-right)) !important;
+}
+
+.surface {
+  background: var(--app-secondary-bg);
+  border-color: var(--app-border);
+}
+
+.muted-surface {
+  background: var(--app-input-bg);
+  border-color: var(--app-border);
+}
+
+.ai-gradient {
+  background: linear-gradient(135deg, var(--app-ai) 0%, var(--app-ai-2) 100%);
+}
+
+.ai-text-gradient {
+  background: linear-gradient(120deg, var(--app-ai), var(--app-ai-2));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Список стилів для нових карток.
+ *
+ * Варіант — це кнопка, тож :focus-visible малюється рамкою, а не тільки
+ * кольором фону: без рамки з клавіатури не видно, де ми зараз. Рамка
+ * фіолетова, тобто читається як фокус застосунку, а не як системне
+ * виділення тексту. */
+.style-option {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.5rem 0.625rem;
+  border-radius: 0.875rem;
+  text-align: left;
+  color: var(--app-text);
+  transition: background-color 0.15s ease;
+}
+
+.style-option:hover {
+  background: color-mix(in srgb, var(--app-link) 8%, transparent);
+}
+
+.style-option:focus-visible {
+  outline: 2px solid var(--app-link);
+  outline-offset: -2px;
+}
+
+.style-option.is-selected {
+  background: color-mix(in srgb, var(--app-link) 12%, transparent);
+}
+
+.style-option-icon {
+  display: flex;
+  height: 1.75rem;
+  width: 1.75rem;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.625rem;
+  background: color-mix(in srgb, var(--app-link) 10%, transparent);
+  color: var(--app-link);
+}
+
+/* Галочка показується лише в обраному варіанті. Інакше в списку з
+ * десятком однакових рядків важко зрозуміти, що саме зараз активне. */
+.style-option-check {
+  flex-shrink: 0;
+  color: var(--app-link);
+  opacity: 0;
+}
+
+.style-option.is-selected .style-option-check {
+  opacity: 1;
+}
+
+.style-option-preview {
+  display: flex;
+  gap: 0.25rem;
+  margin-top: 0.1875rem;
+}
+
+.style-swatch {
+  display: block;
+  height: 0.5rem;
+  width: 0.5rem;
+  border-radius: 9999px;
+  /* Обведення, бо колір плями майже завжди темніший за панель — без нього
+     плями просто зливалися б з фоном списку. */
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--app-text) 18%, transparent);
+}
+
+.style-option-group + .style-option-group {
+  margin-top: 0.375rem;
+  padding-top: 0.375rem;
+  border-top: 1px solid color-mix(in srgb, var(--app-text) 10%, transparent);
+}
+
+.style-option-group-label {
+  padding: 0.375rem 0.625rem 0.25rem;
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--app-hint);
+}
+
+.primary-button {
+  color: var(--app-button-text);
+  background: var(--app-button);
+}
+
+.primary-button:hover {
+  filter: brightness(0.96);
+}
+
+.primary-button:disabled {
+  cursor: not-allowed;
+  filter: grayscale(0.35);
+  opacity: 0.55;
+}
+
+.ghost-button {
+  color: var(--app-text);
+  background: transparent;
+}
+
+.ghost-button:hover {
+  background: var(--app-input-bg);
+}
+
+.icon-button {
+  display: inline-flex;
+  width: 2.5rem;
+  height: 2.5rem;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 0.8rem;
+  background: transparent;
+  box-shadow: none;
+  color: var(--app-hint);
+  transition: background-color 160ms ease, color 160ms ease, transform 160ms ease;
+}
+
+.icon-button:hover {
+  color: var(--app-text);
+  background: var(--app-input-bg);
+}
+
+.icon-button:active,
+.action-button:active,
+.primary-button:active {
+  transform: scale(0.96);
+}
+
+svg[data-lucide] {
+  display: block;
+  flex-shrink: 0;
+}
+
+button > svg[data-lucide] {
+  pointer-events: none;
+}
+
+#chatForm {
+  align-items: flex-end;
+}
+
+#chatForm label {
+  align-items: flex-end;
+}
+
+#attachButton,
+#sendButton {
+  display: inline-flex;
+  width: 2.75rem;
+  height: 2.75rem;
+  min-width: 2.75rem;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 0;
+  border: 0;
+  border-radius: 999px;
+  box-shadow: none;
+}
+
+#attachButton {
+  background: transparent;
+  color: var(--app-hint);
+}
+
+#attachButton:hover {
+  background: var(--app-input-bg);
+  color: var(--app-text);
+}
+
+#sendButton:disabled {
+  box-shadow: none;
+}
+
+.scroll-area {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--app-text) 20%, transparent) transparent;
+  overscroll-behavior-y: contain;
+  overscroll-behavior-x: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.scroll-area::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+
+.scroll-area::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--app-text) 20%, transparent);
+}
+
+.scroll-area::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.message-enter {
+  animation: message-in 320ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.modal-enter {
+  animation: modal-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.fade-enter {
+  animation: fade-in 200ms ease both;
+}
+
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--app-text) 9%, transparent);
+}
+
+.skeleton::after {
+  position: absolute;
+  inset: 0;
+  content: "";
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--app-secondary-bg) 65%, transparent), transparent);
+  animation: shimmer 1.4s infinite;
+}
+
+.spinner {
+  width: 1.1rem;
+  height: 1.1rem;
+  border: 2px solid color-mix(in srgb, var(--app-button-text) 35%, transparent);
+  border-top-color: currentColor;
+  border-radius: 999px;
+  animation: spin 700ms linear infinite;
+}
+
+.markdown {
+  color: var(--app-text);
+  font-size: 0.94rem;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+.markdown > :first-child {
+  margin-top: 0;
+}
+
+.markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3 {
+  margin: 1.1rem 0 0.5rem;
+  font-weight: 750;
+  line-height: 1.25;
+}
+
+.markdown h1 {
+  font-size: 1.35rem;
+}
+
+.markdown h2 {
+  font-size: 1.15rem;
+}
+
+.markdown h3 {
+  font-size: 1rem;
+}
+
+.markdown p,
+.markdown ul,
+.markdown ol,
+.markdown blockquote,
+.markdown pre,
+.markdown table {
+  margin: 0.65rem 0;
+}
+
+.markdown ul,
+.markdown ol {
+  padding-left: 1.25rem;
+}
+
+.markdown ul {
+  list-style: disc;
+}
+
+.markdown ol {
+  list-style: decimal;
+}
+
+.markdown li + li {
+  margin-top: 0.3rem;
+}
+
+.markdown a {
+  color: var(--app-link);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.markdown strong {
+  font-weight: 750;
+}
+
+.markdown blockquote {
+  border-left: 3px solid var(--app-link);
+  border-radius: 0 0.65rem 0.65rem 0;
+  background: var(--app-input-bg);
+  padding: 0.65rem 0.85rem;
+  color: var(--app-hint);
+}
+
+.markdown code {
+  border-radius: 0.35rem;
+  background: var(--app-input-bg);
+  padding: 0.12rem 0.35rem;
+  color: var(--app-link);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.86em;
+}
+
+.markdown pre {
+  overflow-x: auto;
+  border: 1px solid var(--app-border);
+  border-radius: 0.8rem;
+  background: #111827;
+  padding: 0.9rem;
+  color: #e5e7eb;
+}
+
+.markdown pre code {
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  font-size: 0.82rem;
+}
+
+.markdown table {
+  display: block;
+  width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.markdown th,
+.markdown td {
+  min-width: 7rem;
+  border: 1px solid var(--app-border);
+  padding: 0.55rem 0.65rem;
+  text-align: left;
+}
+
+.markdown th {
+  background: var(--app-input-bg);
+  font-weight: 700;
+}
+
+.flip-card {
+  perspective: 1200px;
+}
+
+/*
+ * Обидві сторони живуть в одній комірці гріда, тому висота картки
+ * визначається найвищою стороною. Раніше обидві були position:absolute
+ * з фіксованою висотою 245px, і все, що не вміщувалося, просто
+ * обрізалося — з N полями це означало б, що видно лише перше.
+ */
+.flip-card-inner {
+  position: relative;
+  display: grid;
+  transform-style: preserve-3d;
+  transition: transform 650ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.flip-card.is-flipped .flip-card-inner {
+  transform: rotateY(180deg);
+}
+
+/*
+ * Картка обмежена за висотою і гортається всередині. Грід замість
+ * position:absolute прибрав обрізання, але довге поле робило б картку
+ * заввишки в екран — тому лишаємо межу і внутрішню прокрутку.
+ * overscroll-behavior: contain не дає колесу тікати з картки в чат.
+ *
+ * Розміри навмисно скромні: картка живе в стрічці чату поряд із текстом
+ * відповіді, і раніше вона з'їдала пів екрана. Менша картка — помітно
+ * більше конспекту за один прогляд, а зменшені поля й шрифт роблять її
+ * схожою на справжню анківську, а не на банер.
+ */
+.flip-face {
+  position: relative;
+  grid-area: 1 / 1;
+  display: flex;
+  height: clamp(180px, 44vh, 380px);
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--app-border);
+  border-radius: 0.85rem;
+  backface-visibility: hidden;
+  background: var(--app-secondary-bg);
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.07);
+  padding: 0.7rem;
+}
+
+.flip-face.back {
+  transform: rotateY(180deg);
+}
+
+.flip-face::before {
+  position: absolute;
+  inset: 0;
+  content: "";
+  pointer-events: none;
+  opacity: 0.45;
+  background: radial-gradient(circle at 90% 10%, color-mix(in srgb, var(--app-ai) 16%, transparent), transparent 36%);
+}
+
+.card-content {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  padding: 0.55rem 0.25rem;
+  text-align: center;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/*
+ * margin-block: auto замість align-items: center.
+ * При align-items: center Flexbox центрує навіть при переповненні, тому
+ * верх вмісту опиняється за межею контейнера і не досягається прокруткою:
+ * смужок з'являється, а scrollTop не доходить до потрібної позиції.
+ * Автоматичні поля при відсутності вільного місця стають нульовими,
+ * тож короткий текст лишається по центру, а довгий листається згори.
+ */
+.card-content > .card-value {
+  margin-block: auto;
+}
+
+/* Поля на зворотному стороні йдуть просто списком від початку,
+   тому окремої обгортки й фейкового «смужка» не потрібно. */
+.card-fields {
+  position: relative;
+  z-index: 1;
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  text-align: left;
+}
+
+.card-fields > div + div {
+  margin-top: 0.55rem;
+  padding-top: 0.55rem;
+  border-top: 1px solid rgba(127, 127, 127, .22);
+}
+
+/* Значення поля на зворотному стороні: прокрутку вже має .card-fields,
+   тому тут її бути не повинно, інакше вийде вкладена область. */
+.card-field-value {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Смужок видно навіть там, де система малює overlay-скролер. */
+.card-content,
+.card-fields {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(127, 127, 127, .45) transparent;
+}
+
+.card-content::-webkit-scrollbar,
+.card-fields::-webkit-scrollbar {
+  width: 6px;
+}
+
+.card-content::-webkit-scrollbar-track,
+.card-fields::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.card-content::-webkit-scrollbar-thumb,
+.card-fields::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(127, 127, 127, .45);
+}
+
+.card-extra {
+  max-height: 5.5rem;
+  overflow-y: auto;
+  border-radius: 0.7rem;
+  background: var(--app-input-bg);
+  padding: 0.6rem;
+  color: var(--app-hint);
+  font-size: 0.8rem;
+  text-align: left;
+  white-space: pre-wrap;
+}
+
+.field-control {
+  width: 100%;
+  resize: vertical;
+  border: 1px solid var(--app-border);
+  border-radius: 0.75rem;
+  background: var(--app-input-bg);
+  padding: 0.75rem 0.85rem;
+  color: var(--app-text);
+  transition: border-color 160ms ease, background-color 160ms ease;
+}
+
+.field-control:focus {
+  border-color: var(--app-link);
+  background: var(--app-secondary-bg);
+}
+
+.field-control::placeholder {
+  color: var(--app-hint);
+}
+
+.deck-option,
+.example-chip {
+  transition: transform 160ms ease, border-color 160ms ease, background-color 160ms ease;
+}
+
+.deck-option:hover,
+.example-chip:hover {
+  border-color: var(--app-link);
+  background: color-mix(in srgb, var(--app-link) 7%, var(--app-secondary-bg));
+}
+
+.deck-option:active,
+.example-chip:active {
+  transform: scale(0.98);
+}
+
+.deck-option.is-selected {
+  border-color: var(--app-link);
+  background: color-mix(in srgb, var(--app-link) 9%, var(--app-secondary-bg));
+  box-shadow: inset 0 0 0 1px var(--app-link);
+}
+
+.toast {
+  transform: translate(-50%, 1rem);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.toast.is-visible {
+  transform: translate(-50%, 0);
+  opacity: 1;
+}
+
+/* Стиль колоди: назва активного стилю, рядки бібліотеки, стан змін. */
+.deck-style-active-name {
+  max-width: 9rem;
+  overflow: hidden;
+  padding: 0.0625rem 0.5rem;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--app-link) 14%, transparent);
+  color: var(--app-link);
+  font-size: 10px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+#saveDeckStyleButton.is-dirty {
+  border-color: color-mix(in srgb, #f59e0b 55%, transparent);
+  color: #f59e0b;
+}
+
+.style-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 0.5rem 0.375rem 0.25rem;
+  border: 1px solid color-mix(in srgb, var(--app-hint) 20%, transparent);
+  border-radius: 0.9rem;
+  background: var(--app-secondary-bg);
+  transition: border-color 160ms ease, background-color 160ms ease;
+}
+
+.style-item.is-active {
+  border-color: var(--app-link);
+  background: color-mix(in srgb, var(--app-link) 8%, var(--app-secondary-bg));
+}
+
+.style-item-main {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  border-radius: 0.7rem;
+  text-align: left;
+  transition: background-color 160ms ease;
+}
+
+.style-item-main:hover {
+  background: color-mix(in srgb, var(--app-link) 6%, transparent);
+}
+
+.style-badge {
+  flex-shrink: 0;
+  padding: 0.0625rem 0.5rem;
+  border-radius: 9999px;
+  background: var(--app-link);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.drawer-open {
+  transform: translateX(0) !important;
+}
+
+.truncate-2 {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+@keyframes message-in {
+  from {
+    transform: translateY(10px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes modal-in {
+  from {
+    transform: translateY(14px) scale(0.98);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes shimmer {
+  100% { transform: translateX(100%); }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (min-width: 768px) {
+  .desktop-shadow {
+    box-shadow: 10px 0 30px rgba(15, 23, 42, 0.05);
+  }
+}
+
+@media (max-width: 640px) {
+  .flip-card-inner,
+  .flip-face {
+    min-height: 170px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* --- ПЕРЕГЛЯД КАРТОК ---
+ *
+ * Прев'ю має показувати те саме, що потрапить в Anki. Структурні стилі
+ * нижче дзеркалять BASE_CARD_CSS і FIELD_STYLES_CSS з main.py — цей
+ * код перевіряє test/test_preview_css.py, щоб дві копії не розійшлися.
+ * Коротний CSS користувача застосовується окремо, лише у прев'ю.
+ */
+.deck-preview-scope {
+  container-type: inline-size;
+}
+
+.deck-preview-card-wrap {
+  perspective: 1200px;
+}
+
+.deck-preview-card {
+  grid-area: 1 / 1;
+  display: block;
+  backface-visibility: hidden;
+  transition: transform 650ms cubic-bezier(0.2, 0.7, 0.2, 1);
+  transform: rotateY(0deg);
+  cursor: pointer;
+}
+
+.deck-preview-card-wrap {
+  position: relative;
+  display: grid;
+  transform-style: preserve-3d;
+}
+
+#previewCardBack {
+  transform: rotateY(180deg);
+}
+
+/*
+ * Атрибут має називатися data-flipped — саме його ставить
+ * renderPreview (js/decks.js) і він уже є в index.html на екрані
+ * прев'ю. Раніше тут було data-flapped, через що селектор не збігався
+ * ні з одним елементом: картка у перегляді колоди не переверталася,
+ * хоча в чаті (.flip-card.is-flipped) все працювало.
+ */
+.deck-preview-scope[data-flipped='true'] #previewCardFront {
+  transform: rotateY(-180deg);
+}
+
+.deck-preview-scope[data-flipped='true'] #previewCardBack {
+  transform: rotateY(0deg);
+}
+
+/* Структура сторін — дзеркало qfmt/afmt з main.py. */
+.deck-preview-scope .card {
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-size: 20px;
+  line-height: 1.5;
+  text-align: left;
+  color: #1f2937;
+  background: #ffffff;
+  padding: 18px;
+  max-width: 40em;
+  margin: 0 auto;
+  min-height: 130px;
+  border-radius: 18px;
+  border: 1px solid rgba(127, 127, 127, 0.18);
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.1);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.deck-preview-scope .anki-question {
+  font-size: 1.1em;
+  font-weight: 700;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.deck-preview-scope #answer {
+  margin: 16px 0 12px;
+  border: none;
+  border-top: 2px solid rgba(127, 127, 127, 0.3);
+}
+
+.deck-preview-scope .anki-field {
+  margin: 0 0 12px;
+  padding: 0 0 12px;
+  border-bottom: 1px solid rgba(127, 127, 127, 0.25);
+}
+
+.deck-preview-scope .anki-field:last-child {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.deck-preview-scope .anki-field-name {
+  display: block;
+  margin-bottom: 3px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.3;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  opacity: 0.6;
+}
+
+.deck-preview-scope .anki-field-value {
+  display: block;
+  font-size: 1em;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* MathJax (формули з карток і конспектів). Широкі вирази — матриці,
+   довгі дроби — не повинні розривати картку чи роз'їжджатись по чату,
+   тому їм горизонтальна прокрутка. Правило загальне, бо формули
+   трапляються і в повідомленнях, і в модалці перегляду. */
+mjx-container {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+@media (max-width: 640px) {
+  .deck-preview-scope .card {
+    font-size: 17px;
+    padding: 14px;
+  }
+}

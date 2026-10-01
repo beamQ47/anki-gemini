@@ -1,0 +1,38 @@
+# Render Blueprint для бекенду. Фронтенд лишається на GitHub Pages —
+# він статичний, і бекенд йому не потрібен.
+#
+# Деплой: git push у репозиторій, який під'єднано в Render, або
+# "Apply" цього blueprint. Секрети вводяться один раз у Dashboard
+# (див. .env.example), у git вони не потрапляють ніколи.
+#
+# Що варто знати про plan: free — це 512 МБ RAM і 0.5 CPU, плюс інстанс
+# засинає через 15 хв без запитів. Перший запит після сну піднімає
+# процес і триває 30-60 секунд — фронтенд уже показує стан «думає», тож
+# це не помилка, а очікування. Якщо така пауза не влаштовує, є два
+# виходи: Render Web Service на платному плані або власний сервер.
+services:
+  - type: web
+    name: anki-gemini-api
+    runtime: python
+    plan: free
+    # Найближча до України регіон; змінюється на Frankfurt/Paris.
+    region: frankfurt
+    buildCommand: pip install --no-cache-dir -r requirements.txt
+    # --workers 1 свідомо: пул БД і кеш токенів живуть у пам'яті
+    # процесу, а другий воркер на 512 МБ нічого не додасть.
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1
+    # Без цього Render вважає сервіс мертвим під час холодного старту.
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.13.9"
+      # Обов'язково пулер, не пряме з'єднання: див. пояснення в .env.example.
+      - key: DATABASE_URL
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false

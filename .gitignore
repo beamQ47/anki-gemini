@@ -1,0 +1,24 @@
+# Секрети
+.env
+.env.*
+!.env.example
+
+# Python
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Node
+node_modules/
+
+# Збірка та артефакти
+*.apkg
+*.anki2
+test-results/
+playwright-report/
+
+# Редактори
+.vscode/
+.idea/
+.DS_Store
