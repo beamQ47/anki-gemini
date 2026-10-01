@@ -27,8 +27,20 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: "3.13.9"
-      # Обов'язково пулер, не пряме з'єднання: див. пояснення в .env.example.
-      - key: DATABASE_URL
+      # Окремі DB_* замість одного DATABASE_URL: так пароль копіюється з
+      # локального .env прямо в Dashboard, не треба ніде показувати його
+      # цілком. db.py::_dsn_from_parts() склеює з них DSN сам, а порт
+      # 6543 — це пулер (див. пояснення в .env.example), бо прямий 5432
+      # з Render не дістанеться.
+      - key: DB_HOST
+        sync: false
+      - key: DB_PORT
+        value: "6543"
+      - key: DB_NAME
+        value: "postgres"
+      - key: DB_USER
+        sync: false
+      - key: DB_PASSWORD
         sync: false
       - key: GEMINI_API_KEY
         sync: false
