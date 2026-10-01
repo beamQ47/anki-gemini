@@ -1,4 +1,9 @@
-const API_BASE_URL = window.ANKI_API_BASE_URL || 'http://127.0.0.1:8000';
+// Адреса бекенду. За замовчуванням — Render, бо саме цей код їде на
+// GitHub Pages, і браузер відвідувача не має жодного відношення до
+// 127.0.0.1 на нашій машині. Для локального запуску перевизнач у
+// index.html перед підключенням скриптів:
+//   window.ANKI_API_BASE_URL = 'http://127.0.0.1:8000';
+const API_BASE_URL = window.ANKI_API_BASE_URL || 'https://anki-gemini-api.onrender.com';
 const STORAGE_KEY = 'anki-gemini-decks-v1';
 const MESSAGES_KEY = 'anki-gemini-messages-v1';
 const THEME_KEY = 'anki-gemini-theme-v1';
