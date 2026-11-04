@@ -1,4 +1,4 @@
-const defaultDecks = [
+﻿const defaultDecks = [
   {
     id: 'history-ukraine',
     title: 'Історія України',
@@ -2610,12 +2610,14 @@ function buildPreviewFaces(card, fieldNames) {
 
   const [head, ...tail] = entries;
   const front = `<div class="anki-question anki-field-1" data-field="${escapeHtml(head[0])}">${escapeHtml(head[1])}</div>`;
-  const blocks = tail.map(([name, value], index) => (
-    `<div class="anki-field anki-field-${index + 2}" data-field="${escapeHtml(name)}">` +
-    `<div class="anki-field-name">${escapeHtml(name)}</div>` +
-    `<div class="anki-field-value">${escapeHtml(value)}</div>` +
-    '</div>'
-  ));
+  const blocks = tail
+    .filter(([name, value]) => String(value ?? '').trim().length > 0)
+    .map(([name, value], index) => (
+      `<div class="anki-field anki-field-${index + 2}" data-field="${escapeHtml(name)}">` +
+      `<div class="anki-field-name">${escapeHtml(name)}</div>` +
+      `<div class="anki-field-value">${escapeHtml(value)}</div>` +
+      '</div>'
+    ));
   // На зворотному {{FrontSide}} — це вже відрендерена лицьова сторона.
   const back = front + '<hr id="answer">' + blocks.join('');
   return { front, back };
@@ -2710,5 +2712,24 @@ function navigatePreviewCard(direction) {
   previewState.index = next;
   previewState.flipped = false;
   renderPreview();
+  haptic();
+}
+
+function openMessageCardsPreview(message) {
+  const cards = Array.isArray(message.cards) ? message.cards : [];
+  if (!cards.length) return;
+  const tempDeck = {
+    id: 'preview-' + message.id,
+    title: 'Огляд карток з чату',
+    cards: cards,
+    fieldNames: message.fieldNames,
+    modelCss: message.modelCss || ''
+  };
+  previewState = { deck: tempDeck, index: 0, flipped: false };
+  elements.previewModal.classList.remove('hidden');
+  elements.previewModal.classList.add('flex');
+  renderPreview();
+  refreshIcons(elements.previewModal);
+  elements.closePreviewButton.focus();
   haptic();
 }

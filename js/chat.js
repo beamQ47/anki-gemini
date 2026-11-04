@@ -1,4 +1,4 @@
-function renderMarkdown(source) {
+﻿function renderMarkdown(source) {
   if (!window.marked) {
     return escapeHtml(source).replace(/\n/g, '<br>');
   }
@@ -328,32 +328,45 @@ function renderCards(message) {
   const fieldNames = Array.isArray(message.fieldNames) && message.fieldNames.length
     ? message.fieldNames
     : resolveFieldNames(cards);
+  const scopeClass = `msg-cards-scope-${escapeHtml(message.id || 'def')}`;
+  const scopedCss = (typeof scopePreviewCss === 'function' && message.modelCss)
+    ? scopePreviewCss(message.modelCss, `.${scopeClass}`)
+    : '';
+
   return `
-    <div class="mt-3">
+    <div class="mt-3 ${scopeClass}">
+      ${scopedCss ? `<style>${scopedCss}</style>` : ''}
       <div class="grid gap-3 ${cards.length > 1 ? 'md:grid-cols-2' : ''}">
         ${cards.map((card, index) => {
           const entries = cardEntries(card, fieldNames);
           const [head, ...rest] = entries;
+          const visibleRest = rest.filter(([name, value]) => String(value ?? '').trim().length > 0);
           return `
           <div class="flip-card" data-card-index="${index}" data-message-id="${escapeHtml(message.id)}">
             <div class="flip-card-inner">
-              <div class="flip-face front">
-                <div class="relative z-[1] flex items-center justify-between gap-2">
-                  <span class="rounded-full bg-app-link/10 px-2 py-1 text-[10px] font-extrabold uppercase tracking-wider text-app-button">${escapeHtml(head[0])} · ${index + 1}</span>
-                  <i data-lucide="layers-3" class="h-4 w-4 text-app-hint" aria-hidden="true"></i>
+              <div class="flip-face front card">
+                <div class="relative z-[1] flex items-center justify-between gap-2 mb-1.5">
+                  <span class="rounded-full bg-app-link/10 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wider text-app-button">${escapeHtml(head[0])} · ${index + 1}</span>
+                  <span class="text-[10px] font-semibold text-app-hint flex items-center gap-1">
+                    <i data-lucide="rotate-3d" class="h-3.5 w-3.5" aria-hidden="true"></i>
+                  </span>
                 </div>
-                <div class="card-content text-sm font-extrabold leading-5"><div class="card-value">${escapeHtml(head[1])}</div></div>
-                <div class="relative z-[1] flex items-center justify-between gap-3 text-[10px] font-semibold text-app-hint">
-                  <span>Натисніть, щоб перевернути</span>
-                  <i data-lucide="rotate-3d" class="h-4 w-4" aria-hidden="true"></i>
+                <div class="card-content text-sm font-extrabold leading-5" data-field="${escapeHtml(head[0])}">
+                  <div class="card-value">${escapeHtml(head[1])}</div>
                 </div>
               </div>
-              <div class="flip-face back">
+              <div class="flip-face back card">
+                <div class="relative z-[1] flex items-center justify-between gap-2 mb-1.5">
+                  <span class="rounded-full bg-app-link/10 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wider text-app-button">Зворот · ${index + 1}</span>
+                  <span class="text-[10px] font-semibold text-app-hint flex items-center gap-1">
+                    <i data-lucide="rotate-3d" class="h-3.5 w-3.5" aria-hidden="true"></i>
+                  </span>
+                </div>
                 <div class="card-fields">
-                  ${rest.map(([name, value], position) => `
-                    <div>
-                      <div class="text-[10px] font-extrabold uppercase tracking-wider ${position === 0 ? 'text-emerald-500' : 'text-app-hint'}">${escapeHtml(name)}</div>
-                      <div class="card-field-value text-xs font-bold leading-5">${escapeHtml(value)}</div>
+                  ${visibleRest.map(([name, value], position) => `
+                    <div class="anki-field anki-field-${position + 2}" data-field="${escapeHtml(name)}">
+                      <div class="text-[10px] font-extrabold uppercase tracking-wider anki-field-name ${position === 0 ? 'text-emerald-500' : 'text-app-hint'}">${escapeHtml(name)}</div>
+                      <div class="card-field-value text-xs font-bold leading-5 anki-field-value">${escapeHtml(value)}</div>
                     </div>
                   `).join('') || '<div class="text-xs text-app-hint">Немає додаткових полів</div>'}
                 </div>
@@ -362,10 +375,16 @@ function renderCards(message) {
           </div>
         `;}).join('')}
       </div>
-      <button class="primary-button mt-4 flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-extrabold shadow-sm transition hover:brightness-95" type="button" data-action="save-message-cards" data-message-id="${escapeHtml(message.id)}">
-        <i data-lucide="bookmark-plus" class="h-4 w-4" aria-hidden="true"></i>
-        Зберегти в мої колоди · ${cards.length}
-      </button>
+      <div class="mt-4 flex flex-col sm:flex-row items-center gap-2">
+        <button class="flex flex-1 w-full items-center justify-center gap-2 rounded-2xl bg-app-link/10 px-4 py-3 text-sm font-extrabold text-app-button transition hover:bg-app-link/20 border border-app-border/40" type="button" data-action="preview-message-cards" data-message-id="${escapeHtml(message.id)}">
+          <i data-lucide="eye" class="h-4 w-4" aria-hidden="true"></i>
+          Оглянути картки · ${cards.length}
+        </button>
+        <button class="primary-button flex flex-1 w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-extrabold shadow-sm transition hover:brightness-95" type="button" data-action="save-message-cards" data-message-id="${escapeHtml(message.id)}">
+          <i data-lucide="bookmark-plus" class="h-4 w-4" aria-hidden="true"></i>
+          Зберегти в мої колоди · ${cards.length}
+        </button>
+      </div>
     </div>
   `;
 }

@@ -496,10 +496,12 @@ def build_card_templates(field_names: list[str]) -> list[dict]:
     blocks = ["{{FrontSide}}", '<hr id="answer">']
     for offset, name in enumerate(tail, start=2):
         blocks.append(
+            f"{{{{#{name}}}}}"
             f'<div class="anki-field anki-field-{offset}"{_field_attributes(name)}>'
             f'<div class="anki-field-name">{html.escape(name)}</div>'
             f'<div class="anki-field-value">{{{{{name}}}}}</div>'
             "</div>"
+            f"{{{{/{name}}}}}"
         )
 
     return [{

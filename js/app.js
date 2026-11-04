@@ -1,4 +1,4 @@
-// Адреса бекенду. Локально index.html і API віддає один процес, тож
+﻿// Адреса бекенду. Локально index.html і API віддає один процес, тож
 // достатньо same-origin. На GitHub Pages бекенд окремий — Render.
 // Для інших випадків лишається ручний override:
 //   window.ANKI_API_BASE_URL = 'http://127.0.0.1:8000';
@@ -958,6 +958,11 @@ elements.messages.addEventListener('click', event => {
         css: message.modelCss,
         templates: message.templates
       });
+    }
+  } else if (button.dataset.action === 'preview-message-cards') {
+    const message = appState.messages.find(item => item.id === button.dataset.messageId);
+    if (message?.cards?.length && typeof openMessageCardsPreview === 'function') {
+      openMessageCardsPreview(message);
     }
   } else if (button.dataset.action === 'retry-chat') {
     retryChat();
