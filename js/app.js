@@ -941,9 +941,45 @@ elements.acceptConfirmButton.addEventListener('click', async () => {
   if (action) await action();
 });
 
+let cardPointerDown = null;
+
+elements.messages.addEventListener('pointerdown', event => {
+  const card = event.target.closest('.flip-card');
+  if (card) {
+    cardPointerDown = {
+      x: event.clientX,
+      y: event.clientY,
+      target: event.target
+    };
+  }
+});
+
 elements.messages.addEventListener('click', event => {
   const card = event.target.closest('.flip-card');
   if (card) {
+    // 1. Якщо користувач виділяв текст, не перевертати
+    if (window.getSelection && window.getSelection().toString().trim().length > 0) {
+      return;
+    }
+
+    // 2. Якщо це жест скролу/перетягування (> 5px), не перевертати
+    if (cardPointerDown) {
+      const dx = Math.abs(event.clientX - cardPointerDown.x);
+      const dy = Math.abs(event.clientY - cardPointerDown.y);
+      if (dx > 5 || dy > 5) {
+        return;
+      }
+    }
+
+    // 3. Якщо клік по смужку прокрутки (.card-fields чи .card-content), не перевертати
+    const scrollBox = event.target.closest('.card-fields, .card-content');
+    if (scrollBox) {
+      const rect = scrollBox.getBoundingClientRect();
+      if (event.clientX >= rect.left + scrollBox.clientWidth) {
+        return;
+      }
+    }
+
     card.classList.toggle('is-flipped');
     haptic('light');
     return;

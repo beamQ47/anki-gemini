@@ -632,8 +632,29 @@ button > svg[data-lucide] {
   padding: 0.7rem;
 }
 
+.flip-face.front {
+  z-index: 2;
+  transform: rotateY(0deg) translateZ(1px);
+}
+
 .flip-face.back {
-  transform: rotateY(180deg);
+  z-index: 1;
+  transform: rotateY(180deg) translateZ(1px);
+}
+
+/* Ізоляція подій миші/скролу: неактивна сторона не блокує скрол активної */
+.flip-card.is-flipped .flip-face.front {
+  z-index: 1;
+  pointer-events: none;
+}
+
+.flip-card.is-flipped .flip-face.back {
+  z-index: 2;
+  pointer-events: auto;
+}
+
+.flip-card:not(.is-flipped) .flip-face.back {
+  pointer-events: none;
 }
 
 .flip-face::before {
@@ -682,6 +703,8 @@ button > svg[data-lucide] {
   overflow-y: auto;
   overscroll-behavior: contain;
   text-align: left;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
 }
 
 .card-fields > div + div {
@@ -706,7 +729,7 @@ button > svg[data-lucide] {
 
 .card-content::-webkit-scrollbar,
 .card-fields::-webkit-scrollbar {
-  width: 6px;
+  width: 7px;
 }
 
 .card-content::-webkit-scrollbar-track,
@@ -717,7 +740,12 @@ button > svg[data-lucide] {
 .card-content::-webkit-scrollbar-thumb,
 .card-fields::-webkit-scrollbar-thumb {
   border-radius: 999px;
-  background: rgba(127, 127, 127, .45);
+  background: rgba(127, 127, 127, .55);
+}
+
+.card-content::-webkit-scrollbar-thumb:hover,
+.card-fields::-webkit-scrollbar-thumb:hover {
+  background: rgba(127, 127, 127, .85);
 }
 
 .card-extra {
