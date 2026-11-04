@@ -306,7 +306,7 @@ function renderMessage(message) {
           <span class="rounded-full bg-app-link/10 px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-wider text-app-button">AI</span>
         </div>
         <div class="rounded-3xl rounded-tl-md border surface bg-app-surface p-4 shadow-sm">
-          <div class="markdown">${renderMarkdown(message.content)}</div>
+          ${message.type === 'cards' && /^\s*\{[\s\S]*\}\s*$/.test(String(message.content || '').trim()) ? '' : `<div class="markdown">${renderMarkdown(message.content)}</div>`}
           ${cardMarkup}
         </div>
         <p class="mt-1.5 px-1 text-[10px] text-app-hint">${formatRelativeDate(message.createdAt)}</p>
@@ -415,10 +415,10 @@ async function getAssistantReply(text, file) {
   const payload = await response.json();
   const model = payload.model && typeof payload.model === 'object' ? payload.model : {};
   const fieldNames = resolveFieldNames(payload.cards || [], model.field_names);
-  const cards = normalizeCards(
-    payload.cards || (payload.message ? extractCardsFromText(payload.message) : []),
-    fieldNames
-  );
+  const rawCards = (Array.isArray(payload.cards) && payload.cards.length)
+    ? payload.cards
+    : extractCardsFromText(payload.reply || payload.message || payload.content || '');
+  const cards = normalizeCards(rawCards, fieldNames);
   return {
     content: String(payload.reply || payload.message || 'Готово.'),
     cards,
@@ -429,6 +429,65 @@ async function getAssistantReply(text, file) {
     modelCss: chosen ? chosen.css : (typeof model.css === 'string' ? model.css : ''),
     templates: Array.isArray(model.templates) ? model.templates : []
   };
+}
+
+function repairJsonText(text) {
+  if (!text) return '';
+  let raw = String(text).trim();
+  const start = raw.indexOf('{');
+  const end = raw.lastIndexOf('}');
+  if (start >= 0 && end > start) raw = raw.slice(start, end + 1);
+
+  const out = [];
+  let inString = false;
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i];
+    if (!inString) {
+      if (ch === '"') inString = true;
+      out.push(ch);
+      continue;
+    }
+    if (ch === '\\') {
+      if (i + 1 < raw.length) {
+        const next = raw[i + 1];
+        if (next === '"' || next === '\\' || next === '/') {
+          out.push(ch, next);
+          i++;
+        } else if (['n', 'r', 't', 'b', 'f'].includes(next)) {
+          const after = raw[i + 2] || '';
+          if (/[a-zA-Z]/.test(after)) {
+            out.push('\\\\', next);
+            i++;
+          } else {
+            out.push(ch, next);
+            i++;
+          }
+        } else if (next === 'u' && /^[0-9a-fA-F]{4}/.test(raw.slice(i + 2, i + 6))) {
+          out.push(ch, next);
+          i++;
+        } else {
+          out.push('\\\\', next);
+          i++;
+        }
+      } else {
+        out.push('\\\\');
+      }
+    } else if (ch === '"') {
+      inString = false;
+      out.push(ch);
+    } else if (ch === '\n') {
+      out.push('\\n');
+    } else if (ch === '\r') {
+      // skip
+    } else if (ch === '\t') {
+      out.push('\\t');
+    } else {
+      out.push(ch);
+    }
+  }
+  if (inString) out.push('"');
+  let res = out.join('').replace(/,\s*([}\]])/g, '$1');
+  return res;
 }
 
 function extractCardsFromText(text) {
@@ -442,13 +501,38 @@ function extractCardsFromText(text) {
   const arrayEnd = trimmed.lastIndexOf(']');
   if (arrayStart >= 0 && arrayEnd > arrayStart) candidates.push(trimmed.slice(arrayStart, arrayEnd + 1));
   for (const candidate of candidates) {
+    const cleanCandidate = candidate.trim();
     try {
-      const parsed = JSON.parse(candidate.trim());
-      const cards = Array.isArray(parsed) ? parsed : parsed.cards;
+      const parsed = JSON.parse(cleanCandidate);
+      const cards = Array.isArray(parsed) ? parsed : (parsed && parsed.cards);
       const normalized = normalizeCards(cards);
       if (normalized.length) return normalized;
     } catch (error) {
-      continue;
+      try {
+        const repaired = repairJsonText(cleanCandidate);
+        const parsed = JSON.parse(repaired);
+        const cards = Array.isArray(parsed) ? parsed : (parsed && parsed.cards);
+        const normalized = normalizeCards(cards);
+        if (normalized.length) return normalized;
+      } catch (err2) {
+        // Fallback to regex if syntax error persists
+        const cardBlocks = cleanCandidate.match(/"fields"\s*:\s*\{[^{}]+\}/g) || cleanCandidate.match(/\{[^{}]+\}/g) || [];
+        const extracted = [];
+        for (const block of cardBlocks) {
+          const pairs = [...block.matchAll(/"([^"\\]*(?:\\.[^"\\]*)*)"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/g)];
+          if (pairs.length) {
+            const vals = {};
+            for (const [, k, v] of pairs) {
+              vals[k] = v.replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+            }
+            extracted.push({ fields: vals });
+          }
+        }
+        if (extracted.length) {
+          const normalized = normalizeCards(extracted);
+          if (normalized.length) return normalized;
+        }
+      }
     }
   }
   return [];

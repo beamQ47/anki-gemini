@@ -69,5 +69,37 @@ check("філери та тире в додаткових полях стают�
     {"Код": "201", "Назва": "Created", "Приклад": ""},
 ])
 
+from main import parse_reply
+
+print("\nparse_reply (відновлення невалідного JSON від Gemini)")
+broken_gemini = r'''
+```json
+{
+"deck_name": "Класична механіка",
+"cards": [
+{
+"fields": {
+"Питання": "Як перетворюються прискорення за перетвореннями Галілея?",
+"Відповідь": "Прискорення залишаються інваріантними.",
+"Формула": "\vec{a} = \vec{a}'
+
+\vec{a} — прискорення в нерухомій системі"
+}
+},
+{
+"fields": {
+"Питання": "Коли непридатні?",
+"Відповідь": "При швидкостях світла.",
+"Формула": "c = 3 \cdot 10^8 м/с",
+}
+},
+]
+}
+```
+'''
+parsed = parse_reply(broken_gemini)
+check("невалідний JSON з LaTeX та переносами відновлено", bool(parsed and len(parsed.get("cards", [])) == 2), True)
+check("перша картка містить формулу", "\\vec{a}" in (parsed["cards"][0]["fields"].get("Формула") or ""), True)
+
 print(f"\n{ok} passed, {fail} failed")
 sys.exit(1 if fail else 0)

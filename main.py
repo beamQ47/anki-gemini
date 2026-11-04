@@ -323,19 +323,214 @@ def remove_quietly(path: str) -> None:
     except OSError as error:
         print(f"[export-deck] не вдалося прибрати {path}: {error}")
 
+def repair_json(text: str) -> str:
+    """Виправляє поширені помилки JSON від LLM:
+    1. Неекрановані бекслеші LaTeX (наприклад \\vec, \\alpha, \\frac, \\cdot тощо).
+    2. Сирі переноси рядків всередині рядкових значень "".
+    3. Висячі коми перед } та ].
+    4. Незакриті дужки або лапки, якщо генерація обірвалася.
+    """
+    if not text:
+        return ""
+
+    cleaned = re.sub(r'```(?:json)?', '', text)
+    cleaned = re.sub(r'```', '', cleaned).strip()
+
+    start = cleaned.find("{")
+    end = cleaned.rfind("}")
+    if start == -1:
+        return ""
+    if end == -1 or end < start:
+        raw = cleaned[start:]
+    else:
+        raw = cleaned[start : end + 1]
+
+    out = []
+    in_string = False
+    i = 0
+    n = len(raw)
+
+    while i < n:
+        ch = raw[i]
+
+        if not in_string:
+            if ch == '"':
+                in_string = True
+                out.append(ch)
+            else:
+                out.append(ch)
+            i += 1
+            continue
+
+        # Усередині рядка ""
+        if ch == '\\':
+            if i + 1 < n:
+                next_ch = raw[i + 1]
+                # Перевірка на валідний \\uXXXX
+                if next_ch == 'u' and i + 5 < n and all(c in '0123456789abcdefABCDEF' for c in raw[i+2:i+6]):
+                    out.append(ch)
+                    out.append(next_ch)
+                    i += 2
+                    continue
+                # Якщо це \\" або \\\\ або \\/
+                if next_ch in {'"', '\\', '/'}:
+                    out.append(ch)
+                    out.append(next_ch)
+                    i += 2
+                    continue
+                # Якщо це \\n, \\r, \\t, \\b, \\f:
+                if next_ch in {'n', 'r', 't', 'b', 'f'}:
+                    following = raw[i + 2] if i + 2 < n else ''
+                    # Якщо далі йде літера (наприклад \\frac, \\text, \\beta, \\nabla, \\rho) — це LaTeX!
+                    if following.isalpha():
+                        out.append('\\\\')
+                        out.append(next_ch)
+                        i += 2
+                        continue
+                    else:
+                        out.append(ch)
+                        out.append(next_ch)
+                        i += 2
+                        continue
+                # Будь-який інший бекслеш (наприклад \\vec, \\alpha, \\{, \\ ) — екрануємо для JSON
+                out.append('\\\\')
+                out.append(next_ch)
+                i += 2
+                continue
+            else:
+                out.append('\\\\')
+                i += 1
+                continue
+        elif ch == '"':
+            in_string = False
+            out.append(ch)
+            i += 1
+            continue
+        elif ch == '\n':
+            out.append('\\n')
+            i += 1
+            continue
+        elif ch == '\r':
+            i += 1
+            continue
+        elif ch == '\t':
+            out.append('\\t')
+            i += 1
+            continue
+        else:
+            out.append(ch)
+            i += 1
+            continue
+
+    if in_string:
+        out.append('"')
+
+    repaired = "".join(out)
+    repaired = re.sub(r',\s*([}\]])', r'\1', repaired)
+
+    # Якщо рядок обірвався — балансуємо дужки
+    bracket_stack = []
+    in_s = False
+    esc = False
+    for c in repaired:
+        if in_s:
+            if esc:
+                esc = False
+            elif c == '\\':
+                esc = True
+            elif c == '"':
+                in_s = False
+        else:
+            if c == '"':
+                in_s = True
+            elif c in '{[':
+                bracket_stack.append('}' if c == '{' else ']')
+            elif c in '}]':
+                if bracket_stack and bracket_stack[-1] == c:
+                    bracket_stack.pop()
+
+    if in_s:
+        repaired += '"'
+    while bracket_stack:
+        repaired += bracket_stack.pop()
+
+    return repaired
+
+
+def extract_cards_regex(text: str) -> dict | None:
+    """Запасний парсер: витягує картки регулярними виразами,
+    якщо JSON геть пошкоджений синтаксично.
+    """
+    deck_match = re.search(r'"deck_name"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"', text)
+    deck_name = deck_match.group(1) if deck_match else "Згенерована колода"
+
+    card_blocks = re.findall(r'"fields"\s*:\s*\{([^{}]+)\}', text)
+    if not card_blocks:
+        card_blocks = re.findall(r'\{([^{}]+)\}', text)
+
+    cards = []
+    field_order = []
+    seen_fields = set()
+
+    for block in card_blocks:
+        pairs = re.findall(r'"([^"\\]*(?:\\.[^"\\]*)*)"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"', block)
+        if not pairs:
+            continue
+        card_fields = {}
+        for k, v in pairs:
+            k_clean = k.encode('utf-8').decode('unicode_escape', errors='ignore') if '\\u' in k else k
+            v_clean = v.replace('\\n', '\n').replace('\\t', '\t').replace('\\"', '"').replace('\\\\', '\\')
+            card_fields[k_clean] = v_clean
+            if k_clean not in seen_fields and k_clean not in {"id", "guid", "position", "createdAt"}:
+                seen_fields.add(k_clean)
+                field_order.append(k_clean)
+        if card_fields:
+            cards.append({"fields": card_fields})
+
+    if not cards:
+        return None
+
+    return {
+        "deck_name": deck_name,
+        "model": {"name": "GeneratedModel", "fields": field_order, "css": "", "templates": []},
+        "cards": cards
+    }
+
+
 def parse_reply(text: str) -> dict | None:
     if not text:
         return None
+
+    # Спроба 1: чистий валідний JSON
     start = text.find("{")
     end = text.rfind("}")
-    if start != -1 and end != -1:
+    if start != -1 and end != -1 and end > start:
         clean_reply = text[start : end + 1]
         try:
             parsed = json.loads(clean_reply)
             if "cards" in parsed or "deck_name" in parsed:
                 return parsed
         except json.JSONDecodeError:
-            return None
+            pass
+
+    # Спроба 2: після автоматичного відновлення невалідного JSON
+    try:
+        repaired = repair_json(text)
+        if repaired:
+            parsed = json.loads(repaired)
+            if "cards" in parsed or "deck_name" in parsed:
+                return parsed
+    except Exception:
+        pass
+
+    # Спроба 3: регулярний витяг сутностей карток
+    try:
+        fallback = extract_cards_regex(text)
+        if fallback and fallback.get("cards"):
+            return fallback
+    except Exception:
+        pass
+
     return None
 
 EMPTY_FIELD_PLACEHOLDERS = {
