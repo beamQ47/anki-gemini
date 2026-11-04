@@ -2611,7 +2611,7 @@ function buildPreviewFaces(card, fieldNames) {
   const [head, ...tail] = entries;
   const front = `<div class="anki-question anki-field-1" data-field="${escapeHtml(head[0])}">${escapeHtml(head[1])}</div>`;
   const blocks = tail
-    .filter(([name, value]) => String(value ?? '').trim().length > 0)
+    .filter(([name, value]) => typeof isFieldEmpty === 'function' ? !isFieldEmpty(value) : String(value ?? '').trim().length > 0)
     .map(([name, value], index) => (
       `<div class="anki-field anki-field-${index + 2}" data-field="${escapeHtml(name)}">` +
       `<div class="anki-field-name">${escapeHtml(name)}</div>` +

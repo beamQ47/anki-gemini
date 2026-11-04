@@ -144,6 +144,28 @@ function migrateCard(card, fieldNames) {
   };
 }
 
+const EMPTY_FIELD_PLACEHOLDERS = new Set([
+  '—', '–', '-', '―', '‒',
+  'немає', 'нема', 'відсутнє', 'відсутня', 'відсутній',
+  'н/д', 'n/d', 'n/a', 'na', 'null', 'none',
+  'не застосовується', 'немає даних', 'без позначення',
+  '.', '…', '...',
+]);
+
+/**
+ * Перевіряє, чи є поле порожнім або заповненим філером/тире/заглушкою від Gemini.
+ */
+function isFieldEmpty(value) {
+  if (value === null || value === undefined) return true;
+  const raw = String(value)
+    .replace(/<[^>]*>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/[\u200b-\u200d\ufeff\u00a0]/g, '')
+    .trim();
+  if (!raw) return true;
+  return EMPTY_FIELD_PLACEHOLDERS.has(raw) || EMPTY_FIELD_PLACEHOLDERS.has(raw.toLowerCase());
+}
+
 /**
  * Картки -> [{id, values, createdAt}], вирівняні під fieldNames.
  *
@@ -161,12 +183,16 @@ function normalizeCards(cards, fieldNames) {
     if (!migrated) continue;
     const values = {};
     let filled = false;
-    for (const name of names) {
+    for (let i = 0; i < names.length; i++) {
+      const name = names[i];
       const value = migrated.values[name];
       // Формули нормалізуються тут, а не в розрізних місцях: це єдина
       // точка, через яку проходять усі картки — від відповіді Gemini до
       // експорту. Старі колоди з «S = \pi r^2» виправляються при завантаженні.
-      const text = value === undefined || value === null ? '' : normalizeMathDelimiters(String(value).trim());
+      let text = value === undefined || value === null ? '' : normalizeMathDelimiters(String(value).trim());
+      if (i > 0 && isFieldEmpty(text)) {
+        text = '';
+      }
       values[name] = text;
       if (text) filled = true;
     }
@@ -767,6 +793,7 @@ if (typeof module !== 'undefined' && module.exports) {
     sanitizeDeckStyles,
     migrateCard,
     normalizeCards,
+    isFieldEmpty,
     normalizeMathDelimiters,
     cardEntries,
     deckFieldNames,

@@ -338,6 +338,45 @@ def parse_reply(text: str) -> dict | None:
             return None
     return None
 
+EMPTY_FIELD_PLACEHOLDERS = {
+    "—", "–", "-", "―", "‒",
+    "немає", "нема", "відсутнє", "відсутня", "відсутній",
+    "н/д", "n/d", "n/a", "na", "null", "none",
+    "не застосовується", "немає даних", "без позначення",
+    ".", "…", "...",
+}
+
+
+def is_field_placeholder(value: any) -> bool:
+    """Визначає, чи є значення поля філером/заглушкою (тире, немає, n/a)."""
+    if value is None:
+        return True
+    raw = str(value)
+    raw = re.sub(r"<[^>]+>", "", raw)
+    raw = raw.replace("&nbsp;", " ")
+    raw = re.sub(r"[\s\u200b-\u200d\ufeff\u00a0]+", " ", raw).strip()
+    if not raw:
+        return True
+    return raw in EMPTY_FIELD_PLACEHOLDERS or raw.lower() in EMPTY_FIELD_PLACEHOLDERS
+
+
+def clean_field_value(raw: any, is_first_field: bool = False) -> str:
+    """Очищає значення поля від заглушок Gemini (—, -, немає, N/A).
+
+    Перше поле (питання/термін) не обнуляється, а для всіх додаткових полів
+    (відповідь, пояснення, позначення, формула тощо) філери замінюються на "",
+    щоб умовні шаблони Anki {{#Field}}...{{/Field}} і прев'ю не показували
+    порожні плашки та зайві заголовки.
+    """
+    if raw is None:
+        return ""
+    text = str(raw).strip()
+    text = re.sub(r"^[\s\u200b-\u200d\ufeff\u00a0]+|[\s\u200b-\u200d\ufeff\u00a0]+$", "", text)
+    if not is_first_field and is_field_placeholder(text):
+        return ""
+    return text
+
+
 def normalize_cards_for_frontend(cards_data: dict) -> list[dict]:
     """Перетворює структуру Gemini на плоску: {ім'я поля: значення}.
 
@@ -366,7 +405,10 @@ def normalize_cards_for_frontend(cards_data: dict) -> list[dict]:
         # Без явного списку полів беремо ключі самої картки.
         names = field_names or sanitize_field_names(list(source.keys()))
 
-        values = {name: str(source.get(name, "") or "").strip() for name in names}
+        values = {
+            name: clean_field_value(source.get(name, ""), is_first_field=(idx == 0))
+            for idx, name in enumerate(names)
+        }
         if any(values.values()):
             result.append(values)
 
@@ -651,7 +693,10 @@ def build_anki_deck(
         # фронтенду та {Поле: значення} зі старих даних.
         nested = card.get("values")
         source = nested if isinstance(nested, dict) else card
-        values = [(source.get(name) or "").strip() for name in names]
+        values = [
+            clean_field_value(source.get(name), is_first_field=(idx == 0))
+            for idx, name in enumerate(names)
+        ]
         try:
             guid = build_note_guid(card.get("id"))
         except InvalidIdError:
@@ -803,8 +848,8 @@ async def ask_ai(prompt_text: str, history_list: list, file_bytes: bytes | None,
         ]
     },
     "cards": [
-        {"fields": {"Поле1": "...", "Поле2": "...", "Поле3": "..."}},
-        {"fields": {"Поле1": "...", "Поле2": "...", "Поле3": "..."}}
+        {"fields": {"Поле1": "Питання 1", "Поле2": "Відповідь 1", "Поле3": "Додаткова інформація"}},
+        {"fields": {"Поле1": "Питання 2", "Поле2": "Відповідь 2", "Поле3": ""}}
     ]
     }
 
@@ -820,6 +865,8 @@ async def ask_ai(prompt_text: str, history_list: list, file_bytes: bytes | None,
     3. Максимум 10 полів, мінімум 2.
     4. У шаблонах посилайся ТІЛЬКИ на оголошені поля, синтаксис {{НазваПоля}}.
     5. Кожна картка у "cards" містить РІВНО ті ключі, що в "fields" (усі, без зайвих).
+       ПРАВИЛО ПОРОЖНІХ ПОЛІВ (КРИТИЧНО): Якщо для конкретної картки додаткове поле (наприклад, "Пояснення", "Позначення", "Формула", "Приклад", "Коментар") не потрібне, відсутнє або не стосується цієї теми — ЗАВЖДИ пиши для нього порожній рядок: "".
+       КАТЕГОРИЧНО ЗАБОРОНЕНО вигадувати текст, щоб забити поле, або ставити заглушки/філери: НЕ став тире ("—", "-"), "немає", "н/д", "N/A", "null", "none", "відсутнє". Лише ""! Завдяки цьому Anki та інтерфейс автоматично приховають це поле.
     6. Кількість карток: стільки, скільки потрібно для повного висвітлення матеріалу (зазвичай від 8-15 і більше, залежно від обсягу конспекту).
     7. CSS синтаксично коректний; може бути порожнім рядком.
 

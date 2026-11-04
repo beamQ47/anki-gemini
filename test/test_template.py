@@ -84,5 +84,14 @@ check_that("Anki не відкинув наш CSS", "anki-field-name" in m["css"
 check_that("CSS Gemini збережено", "#123456" in m["css"])
 check_that("стилі полів після CSS Gemini", m["css"].index("#123456") < m["css"].index(".anki-field-name"))
 
+print("\nочищення філерів у build_anki_deck")
+test_cards_filler = [
+    {"Питання": "Що таке матеріальна точка?", "Відповідь": "Ідеалізоване тіло", "Пояснення": "—", "Позначення": "немає"}
+]
+filler_deck = build_anki_deck("Тест", ["Питання", "Відповідь", "Пояснення", "Позначення"], test_cards_filler)
+note_fields = filler_deck.notes[0].fields
+check("філер у Пояснення замінено на порожній рядок", note_fields[2], "")
+check("філер у Позначення замінено на порожній рядок", note_fields[3], "")
+
 print(f"\n{ok} passed, {fail} failed")
 sys.exit(1 if fail else 0)

@@ -340,7 +340,7 @@ function renderCards(message) {
         ${cards.map((card, index) => {
           const entries = cardEntries(card, fieldNames);
           const [head, ...rest] = entries;
-          const visibleRest = rest.filter(([name, value]) => String(value ?? '').trim().length > 0);
+          const visibleRest = rest.filter(([name, value]) => typeof isFieldEmpty === 'function' ? !isFieldEmpty(value) : String(value ?? '').trim().length > 0);
           return `
           <div class="flip-card" data-card-index="${index}" data-message-id="${escapeHtml(message.id)}">
             <div class="flip-card-inner">
