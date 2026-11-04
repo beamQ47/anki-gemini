@@ -138,7 +138,9 @@ check_that("стиль більше не нативний select",
            and "<select" not in html[html.index('id="generationStylePicker"'):
                                       html.index('id="generationStylePicker"') + 700], "")
 check_that("підпис пояснює, що робить авто", "стиль підбере Gemini" in decks_js, "")
-check_that("стилі групуються за колодами", "style-option-group" in decks_js, "")
+check_that("стилі не групуються за колодами", "style-option-group" not in decks_js, "")
+check_that("список береться зі спільної бібліотеки",
+           "function allDeckStyles(" in decks_js and "styleLibrary().filter" in decks_js, "")
 check_that("варіанти мають роль option", 'role="option"' in decks_js, "")
 check_that("обраний позначається для скринрідера", "aria-selected=" in decks_js, "")
 check_that("кольори стилю показані плямами", "styleColorSwatches" in decks_js, "")
@@ -150,11 +152,11 @@ check_that("клавіатура списку обробляється", "handle
            and "elements.generationStyleList.addEventListener('keydown'" in app_js, "")
 check_that("Escape закриває список", "'Escape'" in decks_js, "")
 check_that("стрілки пересувають фокус", "'ArrowDown'" in decks_js and "'ArrowUp'" in decks_js, "")
-check_that("обраний стиль їде в запит", "form.append('style_css', chosen.style.css)" in chat_js, "")
-check_that("разом іде назва", "form.append('style_name', chosen.style.name)" in chat_js, "")
+check_that("обраний стиль їде в запит", "form.append('style_css', chosen.css)" in chat_js, "")
+check_that("разом іде назва", "form.append('style_name', chosen.name)" in chat_js, "")
 check_that("без вибору нічого не додається в запит", "if (chosen) {" in chat_js, "")
 check_that("відповідь не перебиває обраний стиль",
-           "chosen ? chosen.style.css" in chat_js, "")
+           "chosen ? chosen.css" in chat_js, "")
 check_that("вибір збережений між сесіями", "loadGenerationStyleId()" in app_js
            and "saveGenerationStyleId(" in decks_js, "")
 check_that("вибір прив'язаний до акаунта", "generationStyleStorageKey" in decks_js

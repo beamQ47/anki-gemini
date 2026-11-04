@@ -87,6 +87,7 @@ def deck_to_json(row) -> dict:
     return {
         "id": str(row["id"]),
         "parentId": str(row["parent_id"]) if row["parent_id"] else None,
+        "styleId": str(row["style_id"]) if row["style_id"] else None,
         "title": row["title"],
         "fieldNames": json.loads(row["field_names"]) if isinstance(row["field_names"], str) else (row["field_names"] or []),
         "css": row["css"] or "",
@@ -98,6 +99,17 @@ def deck_to_json(row) -> dict:
     }
 
 
+def style_to_json(row) -> dict:
+    return {
+        "id": str(row["id"]),
+        "name": row["name"],
+        "css": row["css"] or "",
+        "createdAt": int(row["created_at"].timestamp() * 1000),
+        "updatedAt": int(row["updated_at"].timestamp() * 1000),
+    }
+
+
+
 def note_to_json(row) -> dict:
     return {
         "id": str(row["id"]),
@@ -106,7 +118,8 @@ def note_to_json(row) -> dict:
     }
 
 
-DECK_COLUMNS = "id, parent_id, title, state, field_names, css, templates, styles, created_at, updated_at"
+DECK_COLUMNS = "id, parent_id, style_id, title, state, field_names, css, templates, styles, created_at, updated_at"
+STYLE_COLUMNS = "id, name, css, created_at, updated_at"
 
 # Бібліотека стилів — об'єкт, бо активний стиль живе в ньому сам
 # (styles.activeId). Окремою колонкою він був би другим джерелом
@@ -125,6 +138,133 @@ def styles_json(styles) -> str:
         "items": items if isinstance(items, list) else [],
     }
     return json.dumps(payload, ensure_ascii=False)
+
+
+# --- БІБЛІОТЕКА СТИЛІВ АКАУНТА ---
+#
+# Стиль належить користувачу, а не колоді. Колода посилається на нього
+# через style_id і зберігає css-знімок: експорт .apkg не повинен залежати
+# від того, чи рядок бібліотеки ще існує.
+
+async def _resolve_style(user_id: str, style_id):
+    """Перевіряє, що стиль існує і належить користувачу. Інакше None.
+
+    Чужий style_id не можна записати в колоду навіть випадково: інакше
+    колода посилалася б на стиль, якого користувач не бачить у списку.
+    """
+    if style_id in (None, ""):
+        return None
+    try:
+        style_uuid = _uuid(style_id, "style")
+    except HTTPException:
+        return None
+    pool = await get_pool()
+    owned = await pool.fetchval(
+        "select 1 from styles where id = $1 and user_id = $2", style_uuid, user_id
+    )
+    return style_uuid if owned else None
+
+
+async def list_styles(user_id: str) -> list[dict]:
+    pool = await get_pool()
+    rows = await pool.fetch(
+        f"select {STYLE_COLUMNS} from styles where user_id = $1 "
+        "order by updated_at desc, lower(name)",
+        user_id,
+    )
+    return [style_to_json(row) for row in rows]
+
+
+async def get_style(user_id: str, style_id: str) -> dict | None:
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        f"select {STYLE_COLUMNS} from styles where id = $1 and user_id = $2",
+        _uuid(style_id, "style"), user_id,
+    )
+    return style_to_json(row) if row else None
+
+
+async def create_style(user_id: str, style_id: str, name: str, css: str) -> dict | None:
+    """Створює або оновлює стиль. on conflict (id) — як у create_deck.
+
+    Форма POST використовується і для створення, і для повторного
+    збереження: фронтенд не мусить пам'ятати, чи рядок уже на сервері.
+    """
+    pool = await get_pool()
+    try:
+        row = await pool.fetchrow(
+            f"""
+            insert into styles (id, user_id, name, css)
+            values ($1, $2, $3, $4)
+            on conflict (id) do update
+                set name = excluded.name,
+                    css = excluded.css,
+                    updated_at = now()
+            where styles.user_id = $2
+            returning {STYLE_COLUMNS}
+            """,
+            _uuid(style_id, "style"), user_id, name.strip(), css or "",
+        )
+    except asyncpg.UniqueViolationError:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Стиль із назвою «{name.strip()}» вже є",
+        )
+    return style_to_json(row) if row else None
+
+
+async def update_style(user_id: str, style_id: str, name: str, css: str) -> dict | None:
+    """Оновлює стиль і CSS усіх колод, які на нього посилаються.
+
+    Інакше колода лишилася б зі старим знімком: у списку був би новий
+    CSS, а в .apkg — старий. Робимо в одній транзакції, щоб не було стану
+    «стиль оновлено, колоди — ні».
+    """
+    pool = await get_pool()
+    style_uuid = _uuid(style_id, "style")
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            try:
+                row = await conn.fetchrow(
+                    f"""
+                    update styles
+                       set name = $3, css = $4, updated_at = now()
+                     where id = $1 and user_id = $2
+                    returning {STYLE_COLUMNS}
+                    """,
+                    style_uuid, user_id, name.strip(), css or "",
+                )
+            except asyncpg.UniqueViolationError:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Стиль із назвою «{name.strip()}» вже є",
+                )
+            if not row:
+                return None
+            await conn.execute(
+                """
+                update decks
+                   set css = $3, updated_at = now()
+                 where style_id = $1 and user_id = $2
+                """,
+                style_uuid, user_id, css or "",
+            )
+    return style_to_json(row)
+
+
+async def delete_style(user_id: str, style_id: str) -> bool:
+    """Видаляє стиль. Колоди лишаються зі своїм css-знімком.
+
+    ON DELETE SET NULL очистить style_id, тож колода більше не показує
+    видалений стиль, але .apkg усе ще має її CSS.
+    """
+    pool = await get_pool()
+    status = await pool.execute(
+        "delete from styles where id = $1 and user_id = $2",
+        _uuid(style_id, "style"), user_id,
+    )
+    return status.endswith("1")
+
 
 
 # --- ІЄРАРХІЯ КОЛОД ---
@@ -289,18 +429,21 @@ async def get_deck(user_id: str, deck_id: str) -> dict | None:
 
 
 async def create_deck(user_id: str, deck_id: str, title: str, field_names: list[str],
-                      css: str, templates: list, parent_id=None, styles=None) -> dict:
+                      css: str, templates: list, parent_id=None, styles=None,
+                      style_id=None) -> dict:
     parent_uuid = await _resolve_parent(user_id, parent_id, deck_id)
+    style_uuid = await _resolve_style(user_id, style_id)
     pool = await get_pool()
     try:
         row = await pool.fetchrow(
             """
-            insert into decks (id, user_id, parent_id, title, state, field_names, css, templates,
+            insert into decks (id, user_id, parent_id, style_id, title, state, field_names, css, templates,
                                styles, anki_deck_id, anki_model_id, model_name)
-            values ($1, $2, $3, $4, 'draft', $5::jsonb, $6, $7::jsonb, $8::jsonb, $9, $10, $11)
+            values ($1, $2, $3, $4, $5, 'draft', $6::jsonb, $7, $8::jsonb, $9::jsonb, $10, $11, $12)
             on conflict (id) do update
                 set title = excluded.title,
                     parent_id = excluded.parent_id,
+                    style_id = excluded.style_id,
                     field_names = excluded.field_names,
                     css = excluded.css,
                     templates = excluded.templates,
@@ -312,7 +455,7 @@ async def create_deck(user_id: str, deck_id: str, title: str, field_names: list[
             where decks.user_id = $2
             returning {cols}
             """.format(cols=DECK_COLUMNS),
-            _uuid(deck_id, "deck"), user_id, parent_uuid, title,
+            _uuid(deck_id, "deck"), user_id, parent_uuid, style_uuid, title,
             json.dumps(field_names, ensure_ascii=False), css or "",
             json.dumps(templates or [], ensure_ascii=False), styles_json(styles),
             deck_anki_id(deck_id), model_anki_id(deck_id), model_name_for(deck_id),
@@ -331,41 +474,48 @@ async def create_deck(user_id: str, deck_id: str, title: str, field_names: list[
     return payload
 
 
+UNSET = object()
+
+
 async def update_deck(user_id: str, deck_id: str, title: str, field_names: list[str],
-                      css: str, templates: list, parent_id=None, styles=None) -> dict | None:
+                      css: str, templates: list, parent_id=None, styles=None,
+                      style_id=UNSET) -> dict | None:
     # parent_id=None означає «не змінювати вкладеність», а не «перенести в
     # корінь»: PUT редагує вміст колоди, і раптове відчеплення від батька
     # було б несподіваним. Явний перенос — окремий запит move_deck.
+    #
+    # style_id=_UNSET — «не чіпати стиль». Явний null очищає посилання:
+    # інакше не було б способу відв'язати стиль від колоди. Клієнт, який
+    # поле не надіслав, не мусить втратити вже вибраний стиль.
     parent_uuid = await _resolve_parent(user_id, parent_id, deck_id)
     pool = await get_pool()
+
+    sets = [
+        "title = $3",
+        "field_names = $4::jsonb",
+        "css = $5",
+        "templates = $6::jsonb",
+        "styles = $7::jsonb",
+    ]
+    args = [
+        _uuid(deck_id, "deck"), user_id, title,
+        json.dumps(field_names, ensure_ascii=False), css or "",
+        json.dumps(templates or [], ensure_ascii=False), styles_json(styles),
+    ]
+    if style_id is not UNSET:
+        args.append(await _resolve_style(user_id, style_id))
+        sets.append(f"style_id = ${len(args)}")
+    if not (parent_uuid is None and parent_id in (None, "")):
+        args.append(parent_uuid)
+        sets.append(f"parent_id = ${len(args)}")
+    sets.append("updated_at = now()")
+
     try:
-        if parent_uuid is None and parent_id in (None, ""):
-            row = await pool.fetchrow(
-                """
-                update decks
-                set title = $3, field_names = $4::jsonb, css = $5, templates = $6::jsonb,
-                    styles = $7::jsonb, updated_at = now()
-                where id = $1 and user_id = $2
-                returning {cols}
-                """.format(cols=DECK_COLUMNS),
-                _uuid(deck_id, "deck"), user_id, title,
-                json.dumps(field_names, ensure_ascii=False), css or "",
-                json.dumps(templates or [], ensure_ascii=False), styles_json(styles),
-            )
-        else:
-            row = await pool.fetchrow(
-                """
-                update decks
-                set title = $3, parent_id = $8, field_names = $4::jsonb, css = $5,
-                    templates = $6::jsonb, styles = $7::jsonb, updated_at = now()
-                where id = $1 and user_id = $2
-                returning {cols}
-                """.format(cols=DECK_COLUMNS),
-                _uuid(deck_id, "deck"), user_id, title,
-                json.dumps(field_names, ensure_ascii=False), css or "",
-                json.dumps(templates or [], ensure_ascii=False), styles_json(styles),
-                parent_uuid,
-            )
+        row = await pool.fetchrow(
+            f"update decks set {', '.join(sets)} "
+            f"where id = $1 and user_id = $2 returning {DECK_COLUMNS}",
+            *args,
+        )
     except asyncpg.UniqueViolationError:
         raise HTTPException(
             status_code=409,
@@ -481,18 +631,27 @@ async def replace_notes(user_id: str, deck_id: str, cards: list[dict]) -> dict |
                 return None
 
             await conn.execute("delete from notes where deck_id = $1", deck_uuid)
-            for position, card in enumerate(cards or []):
-                await conn.execute(
+            records = [
+                (
+                    _uuid(card["id"], "card"),
+                    deck_uuid,
+                    str(_uuid(card["id"], "card")),
+                    json.dumps(card.get("values") or {}, ensure_ascii=False),
+                    position,
+                )
+                for position, card in enumerate(cards or [])
+            ]
+            if records:
+                await conn.executemany(
                     """
                     insert into notes (id, deck_id, guid, field_values, position)
-                    values ($1::uuid, $2, $1::text, $3::jsonb, $4)
+                    values ($1, $2, $3, $4::jsonb, $5)
                     on conflict (id) do update
                         set field_values = excluded.field_values,
                             position = excluded.position,
                             updated_at = now()
                     """,
-                    _uuid(card["id"], "card"), deck_uuid,
-                    json.dumps(card.get("values") or {}, ensure_ascii=False), position,
+                    records,
                 )
 
     notes = await pool.fetch(

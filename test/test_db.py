@@ -166,6 +166,41 @@ async def main():
         check("title оновлено", again["title"], "Оновлена")
         check("усього одна колода", len(await db.list_decks(ALICE)), 1)
 
+        print("\nБібліотека стилів акаунта")
+        STYLE = str(uuid_mod.uuid4())
+        style = await db.create_style(ALICE, STYLE, "Основний", ".card{color:red}")
+        check("стиль створено", style["id"], STYLE)
+        check("назва стилю", style["name"], "Основний")
+        check("css стилю", style["css"], ".card{color:red}")
+        check("стиль у списку", [s["id"] for s in await db.list_styles(ALICE)], [STYLE])
+        check("Bob не бачить стиль", await db.list_styles(BOB), [])
+        check("get_style для Bob -> None", await db.get_style(BOB, STYLE), None)
+        check_that("update_style для Bob -> None",
+                   await db.update_style(BOB, STYLE, "злом", "x") is None)
+
+        bound = await db.update_deck(ALICE, DECK, "Оновлена", FIELDS, ".card{}", [],
+                                     style_id=STYLE)
+        check("колода посилається на стиль", bound["styleId"], STYLE)
+        updated = await db.update_style(ALICE, STYLE, "Основний 2", ".card{color:blue}")
+        check("стиль оновлено", updated["name"], "Основний 2")
+        deck_after = await db.get_deck(ALICE, DECK)
+        check("css колоди оновився разом зі стилем", deck_after["css"], ".card{color:blue}")
+        check("посилання на стиль не змінилось", deck_after["styleId"], STYLE)
+
+        # Чужий style_id не можна прив'язати навіть через create_deck:
+        # інакше колода посилалася б на невидимий стиль.
+        BOB_DECK = str(uuid_mod.uuid4())
+        bob_deck = await db.create_deck(BOB, BOB_DECK, "Чужа", FIELDS, "", [],
+                                        style_id=STYLE)
+        check("чужий стиль не прив'язався", bob_deck["styleId"], None)
+        await db.delete_deck(BOB, BOB_DECK)
+
+        check("стиль видалено", await db.delete_style(ALICE, STYLE), True)
+        orphan = await db.get_deck(ALICE, DECK)
+        check("колода лишилась після видалення стилю", bool(orphan), True)
+        check("посилання на стиль очищено", orphan["styleId"], None)
+        check("css-знімок лишився в колоді", orphan["css"], ".card{color:blue}")
+
         print("\nВидалення")
         check("колоду видалено", await db.delete_deck(ALICE, DECK), True)
         check("повторне видалення -> False", await db.delete_deck(ALICE, DECK), False)

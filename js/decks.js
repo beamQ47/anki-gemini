@@ -48,17 +48,17 @@ function migrateDeck(deck) {
   const css = typeof source.modelCss === 'string'
     ? source.modelCss
     : (typeof source.css === 'string' ? source.css : '');
-  // Активний стиль — джерело істини для CSS: якщо бібліотека є, modelCss
-  // береться з неї. Інакше після перезавантаження екран показував би
-  // збережений у колоді CSS, а «Зберегти стиль» перезаписав би його
-  // правилом зі стилю, який користувач бачив.
+  // Стиль більше не живе в колоді: deck.styleId — посилання на спільну
+  // бібліотеку акаунта, а modelCss/css — знімок для .apkg. Старий формат
+  // (styles.items) лишаємо для міграції: migrateLegacyDeckStyles перенесе
+  // його в бібліотеку один раз.
   const styles = sanitizeDeckStyles(source.styles, css);
-  const active = styles.items.find(item => item.id === styles.activeId);
   return {
     id: ensureUuid(source.id),
     parentId: normalizeUuid(source.parentId),
     title: typeof source.title === 'string' ? source.title : 'Без назви',
-    modelCss: active ? active.css : css,
+    styleId: normalizeUuid(source.styleId) || '',
+    modelCss: css,
     styles,
     templates: Array.isArray(source.templates) ? source.templates : [],
     fieldNames: names,
@@ -96,6 +96,135 @@ function currentUserId() {
 function deckStorageKey() {
   const userId = currentUserId();
   return userId ? `${STORAGE_KEY}:${userId}` : STORAGE_KEY;
+}
+
+// --- СПІЛЬНА БІБЛІОТЕКА СТИЛІВ ---
+//
+// Стиль належить акаунту, а не колоді. Один і той самий CSS можна
+// застосувати до будь-якої колоди й обрати для Gemini. Тому в колоді
+// зберігається лише styleId (посилання) та css-знімок для .apkg.
+
+function styleStorageKey() {
+  const userId = currentUserId();
+  return userId ? `${STORAGE_KEY}:${userId}:styles` : `${STORAGE_KEY}:styles`;
+}
+
+function normalizeStyle(raw) {
+  const source = raw && typeof raw === 'object' ? raw : {};
+  const name = String(source.name ?? '').trim().slice(0, 60);
+  return {
+    id: normalizeUuid(source.id) || '',
+    name: name || 'Стиль',
+    css: typeof source.css === 'string' ? source.css : '',
+    updatedAt: Number(source.updatedAt) || Date.now()
+  };
+}
+
+function loadStylesLocally() {
+  try {
+    const saved = localStorage.getItem(styleStorageKey());
+    const source = saved ? JSON.parse(saved) : null;
+    if (!Array.isArray(source)) return [];
+    return source.map(normalizeStyle).filter(style => style.id);
+  } catch (error) {
+    return [];
+  }
+}
+
+function saveStylesLocally() {
+  try {
+    localStorage.setItem(styleStorageKey(), JSON.stringify(styleLibrary()));
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
+
+function styleLibrary() {
+  return Array.isArray(appState.styleLibrary) ? appState.styleLibrary : [];
+}
+
+function findLibraryStyle(styleId) {
+  if (!styleId) return null;
+  return styleLibrary().find(style => style.id === styleId) || null;
+}
+
+function findLibraryStyleByName(name) {
+  const clean = String(name || '').trim().toLowerCase();
+  if (!clean) return null;
+  return styleLibrary().find(style => style.name.toLowerCase() === clean) || null;
+}
+
+function uniqueStyleName(base) {
+  const clean = String(base || 'Мій стиль').trim().slice(0, 60) || 'Мій стиль';
+  if (!findLibraryStyleByName(clean)) return clean;
+  for (let index = 2; index < 1000; index += 1) {
+    const candidate = `${clean} ${index}`;
+    if (!findLibraryStyleByName(candidate)) return candidate;
+  }
+  return `${clean} ${Date.now()}`;
+}
+
+function stylePayload(style) {
+  return { id: style.id, name: style.name, css: style.css || '' };
+}
+
+/**
+ * Переносить старі стилі з колод у спільну бібліотеку.
+ *
+ * Старий формат дозволяв кожній колоді мати власну копію «Основного».
+ * Після переходу це один стиль на акаунт: однакові назви зливаються, а
+ * колода отримує посилання на відповідний рядок бібліотеки.
+ */
+function migrateLegacyDeckStyles() {
+  let changed = false;
+  for (const deck of appState.decks) {
+    const legacy = deck && deck.styles && Array.isArray(deck.styles.items) ? deck.styles.items : [];
+    for (const item of legacy) {
+      if (!item || typeof item !== 'object') continue;
+      const name = String(item.name || '').trim().slice(0, 60);
+      const css = typeof item.css === 'string' ? item.css : '';
+      if (!name || !css.trim()) continue;
+      if (findLibraryStyleByName(name)) continue;
+      styleLibrary().push({
+        id: ensureUuid(item.id),
+        name,
+        css,
+        updatedAt: Number(item.updatedAt) || Date.now()
+      });
+      changed = true;
+    }
+    if (deck && !deck.styleId && legacy.length && deck.styles) {
+      const active = legacy.find(item => item.id === deck.styles.activeId) || legacy[0];
+      const style = active ? findLibraryStyleByName(active.name) : null;
+      if (style) {
+        deck.styleId = style.id;
+        deck.modelCss = style.css || deck.modelCss;
+        changed = true;
+      }
+    }
+  }
+  if (changed) saveStylesLocally();
+  return changed;
+}
+
+/** CSS колоди завжди дорівнює CSS її стилю — одне джерело істини. */
+function bindDecksToStyles() {
+  for (const deck of appState.decks) {
+    const style = findLibraryStyle(deck.styleId);
+    if (!style) continue;
+    if (deck.modelCss !== style.css) deck.modelCss = style.css;
+  }
+}
+
+/** Оновлює css-знімок у всіх колодах, які посилаються на стиль. */
+function applyStyleToBoundDecks(style) {
+  if (!style) return;
+  for (const deck of appState.decks) {
+    if (deck.styleId !== style.id) continue;
+    deck.modelCss = style.css;
+    deck.updatedAt = Date.now();
+  }
 }
 
 // --- ЧАТИ ---
@@ -363,7 +492,12 @@ function adoptOrphanCache() {
 // ще лежали б колоди попереднього акаунта і могли б зберегтися в новий.
 function switchToCurrentUserCache() {
   adoptOrphanCache();
+  appState.styleLibrary = loadStylesLocally();
   appState.decks = loadDecks();
+  // Старі стилі всередині колод переносимо в спільний список до першого
+  // рендеру: інакше в редакторі був би порожній вибір стилю.
+  migrateLegacyDeckStyles();
+  bindDecksToStyles();
   if (!appState.decks.some((deck) => deck.id === appState.activeDeckId)) {
     appState.activeDeckId = appState.decks[0]?.id || null;
   }
@@ -434,6 +568,7 @@ function deckToServerPayload(deck) {
   return {
     id: deck.id,
     parent_id: deck.parentId || null,
+    style_id: deck.styleId || null,
     title: deck.title,
     field_names: deck.fieldNames,
     css: deck.modelCss || '',
@@ -462,6 +597,24 @@ async function pushDeckChain(decks) {
   }
 }
 
+/**
+ * Надсилає стилі нових колод ДО самих колод.
+ *
+ * Інакше deck.style_id на сервері вказував би на рядок, якого ще немає:
+ * _resolve_style тихо записав би null, і колода втратила б прив'язку,
+ * доки її хтось не збереже повторно. POST — upsert, тож повторний виклик
+ * безпечний; дублі в межах одного ланцюга відсіюємо.
+ */
+async function pushDeckStyles(decks) {
+  const sent = new Set();
+  for (const deck of decks) {
+    const style = activeDeckStyle(deck);
+    if (!style || sent.has(style.id)) continue;
+    sent.add(style.id);
+    await persistStyleToServer(style, { create: true });
+  }
+}
+
 async function pushDeckToServer(deck) {
   // POST, а не PUT /api/decks/{id}: для нової колоди рядка на сервері ще
   // немає, тож PUT відповідав би 404 і колода назавжди залишилася б лише
@@ -477,6 +630,198 @@ async function pushDeckToServer(deck) {
     method: 'PUT',
     body: JSON.stringify(cardsToServerPayload(deck))
   });
+}
+
+/**
+ * Досилає на сервер колоди, чий styleId щойно переприв'язали.
+ *
+ * Без цього сервер лишався б зі старим (або null) style_id, і наступна
+ * синхронізація знову перетерла б локальну прив'язку.
+ */
+async function pushChangedDecks(deckIds) {
+  for (const deckId of deckIds) {
+    const deck = appState.decks.find(item => item.id === deckId);
+    if (!deck) continue;
+    try {
+      await pushDeckToServer(deck);
+    } catch (error) {
+      // Одна колода не має зривати синхронізацію решти.
+    }
+  }
+}
+
+/**
+ * Надсилає стиль на сервер. PUT оновлює і CSS усіх колод, які на нього
+ * посилаються (так робить db.update_style). Якщо рядка ще немає — POST.
+ */
+async function persistStyleToServer(style, { create = false } = {}) {
+  if (!style || !style.id) return null;
+  const path = create ? '/api/styles' : `/api/styles/${style.id}`;
+  try {
+    const saved = await apiRequestJson(path, {
+      method: create ? 'POST' : 'PUT',
+      body: JSON.stringify(stylePayload(style))
+    });
+    if (saved && saved.id) {
+      Object.assign(style, normalizeStyle(saved));
+      saveStylesLocally();
+    }
+    setStorageStatus('Синхронізовано з акаунтом', 'remote');
+    return saved;
+  } catch (error) {
+    if (create && error && error.status === 409) {
+      const adopted = await adoptStyleByServerName(style);
+      if (adopted) return adopted;
+    }
+    if (!create && error && error.status === 404) {
+      return persistStyleToServer(style, { create: true });
+    }
+    setStorageStatus('Стиль збережено локально, сервер недоступний', 'error');
+    return null;
+  }
+}
+
+/**
+ * Приймає серверний стиль замість локальної копії з тим самим ім'ям.
+ *
+ * 409 означає, що на сервері вже є стиль із такою назвою, але з іншим id.
+ * Без цього локальна колода лишалася б прив'язаною до неіснуючого id, і
+ * сервер записав би їй style_id = null.
+ */
+async function adoptStyleByServerName(style) {
+  let remote = [];
+  try {
+    const data = await apiRequestJson('/api/styles');
+    remote = Array.isArray(data && data.styles) ? data.styles.map(normalizeStyle) : [];
+  } catch (error) {
+    return null;
+  }
+  const name = String(style.name || '').trim().toLowerCase();
+  const match = remote.find(item =>
+    item.id && String(item.name || '').trim().toLowerCase() === name);
+  if (!match) return null;
+  const reboundDeckIds = new Set();
+  const rebound = remapLocalStyleId(style.id, match.id, reboundDeckIds);
+  Object.assign(style, match);
+  appState.styleLibrary = [...new Map(styleLibrary().map(item => [item.id, item])).values()];
+  saveStylesLocally();
+  if (rebound) {
+    saveDecksLocally();
+    await pushChangedDecks(reboundDeckIds);
+  }
+  bindDecksToStyles();
+  return match;
+}
+
+/**
+ * Переносить усі локальні посилання з одного styleId на інший.
+ *
+ * Потрібно, коли локальний стиль виявився копією серверного: id різні,
+ * назва та сама. Без цього колода лишалася б прив'язаною до id, якого
+ * на сервері немає, і _resolve_style записав би style_id = null.
+ */
+function remapLocalStyleId(fromId, toId, changedDecks = null) {
+  if (!fromId || !toId || fromId === toId) return false;
+  let changed = false;
+  for (const deck of appState.decks) {
+    let deckChanged = false;
+    if (deck.styleId === fromId) {
+      deck.styleId = toId;
+      deckChanged = true;
+    }
+    const legacy = deck.styles;
+    if (legacy && legacy.activeId === fromId) {
+      legacy.activeId = toId;
+      deckChanged = true;
+    }
+    if (legacy && Array.isArray(legacy.items)) {
+      for (const item of legacy.items) {
+        if (item && item.id === fromId) {
+          item.id = toId;
+          deckChanged = true;
+        }
+      }
+    }
+    if (deckChanged) {
+      changed = true;
+      if (changedDecks) changedDecks.add(deck.id);
+    }
+  }
+  for (const key of ['selectedStyleId', 'generationStyleId']) {
+    if (appState[key] === fromId) {
+      appState[key] = toId;
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+/**
+ * Синхронізація спільної бібліотеки.
+ *
+ * Сервер — джерело істини, але локальні стилі не можна викидати: вони
+ * могли з'явитися офлайн або з міграції старих колод. Тому об'єднуємо
+ * списки й досилаємо те, чого на сервері ще немає.
+ */
+async function syncStylesFromServer() {
+  migrateLegacyDeckStyles();
+  let remote = null;
+  try {
+    const data = await apiRequestJson('/api/styles');
+    remote = Array.isArray(data && data.styles) ? data.styles : [];
+  } catch (error) {
+    remote = null;
+  }
+
+  const merged = new Map();
+  const remoteByName = new Map();
+  if (remote) {
+    for (const raw of remote) {
+      const style = normalizeStyle(raw);
+      if (!style.id) continue;
+      merged.set(style.id, style);
+      const name = String(style.name || '').trim().toLowerCase();
+      if (name && !remoteByName.has(name)) remoteByName.set(name, style);
+    }
+  }
+  let rebound = false;
+  const reboundDeckIds = new Set();
+  for (const raw of styleLibrary()) {
+    const style = normalizeStyle(raw);
+    if (!style.id || merged.has(style.id)) continue;
+    const sameName = remoteByName.get(String(style.name || '').trim().toLowerCase());
+    if (sameName) {
+      // Це та сама тема, але з іншим id (наприклад, два вкладення вперше
+      // створили «Основний» одночасно). Лишаємо серверний id і переносимо
+      // на нього всі колоди, інакше POST отримав би 409, а style_id — null.
+      if (remapLocalStyleId(style.id, sameName.id, reboundDeckIds)) rebound = true;
+      continue;
+    }
+    merged.set(style.id, style);
+  }
+  appState.styleLibrary = [...merged.values()]
+    .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  saveStylesLocally();
+  if (rebound) {
+    saveDecksLocally();
+    await pushChangedDecks(reboundDeckIds);
+  }
+  bindDecksToStyles();
+
+  if (remote) {
+    const remoteIds = new Set(remote.map(style => normalizeStyle(style).id).filter(Boolean));
+    for (const style of styleLibrary()) {
+      if (remoteIds.has(style.id)) continue;
+      await persistStyleToServer(style, { create: true });
+    }
+    saveStylesLocally();
+  }
+
+  renderStyleList();
+  renderDeckStyleList();
+  renderGenerationStyleList();
+  if (appState.editorDeckId) renderEditor();
+  return styleLibrary();
 }
 
 async function syncDecksFromServer() {
@@ -518,6 +863,9 @@ async function syncDecksFromServer() {
   if (!appState.decks.some((deck) => deck.id === appState.activeDeckId)) {
     appState.activeDeckId = appState.decks[0]?.id || null;
   }
+  // Стилі синхронізуємо після колод: міграція старих стилів потребує
+  // самих колод, а прив'язка deck.styleId — уже завантаженої бібліотеки.
+  await syncStylesFromServer();
   saveDecksLocally();
   setStorageStatus('Синхронізовано з акаунтом', 'remote');
   renderDecks();
@@ -581,53 +929,44 @@ function renderDeckRow(row) {
   }).join('');
 
   return `
-      <article class="deck-option rounded-2xl border ${active ? 'is-selected' : ''} border-app-hint/10 p-3.5" data-deck-id="${escapeHtml(deck.id)}" style="margin-left:${indent}px">
-        <div class="flex items-start gap-2">
+      <article class="deck-option rounded-xl border ${active ? 'is-selected' : ''} border-app-hint/10 p-2 px-2.5" data-deck-id="${escapeHtml(deck.id)}" style="margin-left:${indent}px">
+        <div class="flex items-center gap-1.5">
           ${toggle}
-          <button class="flex min-w-0 flex-1 items-start gap-3 text-left" type="button" data-action="select-deck" data-deck-id="${escapeHtml(deck.id)}" aria-label="Обрати колоду ${escapeHtml(deck.title)}">
-            <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${active ? 'bg-app-button text-app-button-text' : 'bg-app-link/10 text-app-button'} text-sm font-extrabold">${escapeHtml(initial)}</span>
+          <button class="flex min-w-0 flex-1 items-center gap-2 text-left" type="button" data-action="select-deck" data-deck-id="${escapeHtml(deck.id)}" aria-label="Обрати колоду ${escapeHtml(deck.title)}">
+            <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${active ? 'bg-app-button text-app-button-text' : 'bg-app-link/10 text-app-button'} text-xs font-extrabold">${escapeHtml(initial)}</span>
             <span class="min-w-0 flex-1">
-              <span class="block truncate text-sm font-extrabold">${escapeHtml(deck.title)}</span>
+              <span class="block truncate text-xs font-extrabold">${escapeHtml(deck.title)}</span>
               ${ancestors.length
-                ? `<span class="mt-0.5 block truncate text-[10px] font-medium text-app-hint">${escapeHtml(ancestors.map(item => item.title).join(' / '))}</span>`
+                ? `<span class="block truncate text-[9px] font-medium text-app-hint">${escapeHtml(ancestors.map(item => item.title).join(' / '))}</span>`
                 : ''}
-              <span class="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] font-medium text-app-hint">
+              <span class="flex flex-wrap items-center gap-1 text-[10px] font-medium text-app-hint">
                 <i data-lucide="layers-2" class="h-3 w-3" aria-hidden="true"></i>
-                ${deck.cards.length} ${pluralizeCards(deck.cards.length)} · ${formatRelativeDate(deck.updatedAt)}
-                ${row.hasChildren ? `<span class="rounded-full bg-app-link/10 px-1.5 py-0.5 text-[10px] text-app-button">+${subtree} ${pluralizeDecks(subtree)}</span>` : ''}
+                ${deck.cards.length} ${pluralizeCards(deck.cards.length)}
+                ${row.hasChildren ? `<span class="rounded-full bg-app-link/10 px-1 py-0.2 text-[9px] text-app-button">+${subtree}</span>` : ''}
               </span>
             </span>
-            <i data-lucide="check-circle-2" class="h-4 w-4 shrink-0 ${active ? 'text-app-button' : 'hidden'}" aria-hidden="true"></i>
+            <i data-lucide="check-circle-2" class="h-3.5 w-3.5 shrink-0 ${active ? 'text-app-button' : 'hidden'}" aria-hidden="true"></i>
           </button>
         </div>
-        <div class="mt-3 space-y-1.5 border-t border-app-hint/10 pt-2.5">
-          <button class="action-button flex w-full items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-[10px] font-bold text-app-hint transition hover:bg-emerald-500/8 hover:text-emerald-500" type="button" data-action="preview-deck" data-deck-id="${escapeHtml(deck.id)}" title="Переглянути картки як в Anki">
-            <i data-lucide="eye" class="h-3.5 w-3.5" aria-hidden="true"></i>
-            Переглянути
-          </button>
-          <div class="grid grid-cols-3 gap-1.5">
-            <button class="action-button flex items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-[10px] font-bold text-app-hint transition hover:bg-app-link/8 hover:text-app-button" type="button" data-action="edit-deck" data-deck-id="${escapeHtml(deck.id)}" title="Редагувати картки">
-              <i data-lucide="pencil" class="h-3.5 w-3.5" aria-hidden="true"></i>
-              Редагувати
-            </button>
-            <button class="action-button flex items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-[10px] font-bold text-app-hint transition hover:bg-violet-500/10 hover:text-violet-400" type="button" data-action="download-deck" data-deck-id="${escapeHtml(deck.id)}" title="Завантажити .apkg">
-              <i data-lucide="download" class="h-3.5 w-3.5" aria-hidden="true"></i>
-              .apkg
-            </button>
-            <button class="action-button flex items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-[10px] font-bold text-app-hint transition hover:bg-red-500/8 hover:text-red-500" type="button" data-action="delete-deck" data-deck-id="${escapeHtml(deck.id)}" title="Видалити колоду">
-              <i data-lucide="trash-2" class="h-3.5 w-3.5" aria-hidden="true"></i>
-              Видалити
-            </button>
-          </div>
-          <div class="flex items-center gap-1.5">
-            <label class="min-w-0 flex-1">
-              <span class="sr-only">Вкласти в колоду</span>
-              <select class="deck-parent-select w-full appearance-none rounded-lg border muted-surface border-app-hint/10 bg-app-bg px-2 py-1.5 text-[10px] font-bold text-app-hint" data-deck-id="${escapeHtml(deck.id)}">
-                ${parentSelect}
-              </select>
-            </label>
-            <button class="action-button flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-app-hint transition hover:bg-emerald-500/8 hover:text-emerald-500" type="button" data-action="new-subdeck" data-deck-id="${escapeHtml(deck.id)}" title="Створити підколоду" aria-label="Створити підколоду в «${escapeHtml(deck.title)}»">
+        <div class="mt-1.5 flex items-center justify-between gap-1 border-t border-app-hint/10 pt-1.5">
+          <label class="min-w-0 flex-1">
+            <span class="sr-only">Вкласти в колоду</span>
+            <select class="deck-parent-select w-full appearance-none rounded-lg border muted-surface border-app-hint/10 bg-app-bg px-1.5 py-1 text-[10px] font-bold text-app-hint" data-deck-id="${escapeHtml(deck.id)}">
+              ${parentSelect}
+            </select>
+          </label>
+          <div class="flex shrink-0 items-center gap-0.5">
+            <button class="action-button flex h-7 w-7 items-center justify-center rounded-lg text-app-hint transition hover:bg-emerald-500/10 hover:text-emerald-500" type="button" data-action="new-subdeck" data-deck-id="${escapeHtml(deck.id)}" title="Створити підколоду" aria-label="Створити підколоду в «${escapeHtml(deck.title)}»">
               <i data-lucide="folder-plus" class="h-3.5 w-3.5" aria-hidden="true"></i>
+            </button>
+            <button class="action-button flex h-7 w-7 items-center justify-center rounded-lg text-app-hint transition hover:bg-app-link/10 hover:text-app-button" type="button" data-action="edit-deck" data-deck-id="${escapeHtml(deck.id)}" title="Редагувати картки" aria-label="Редагувати ${escapeHtml(deck.title)}">
+              <i data-lucide="pencil" class="h-3.5 w-3.5" aria-hidden="true"></i>
+            </button>
+            <button class="action-button flex h-7 w-7 items-center justify-center rounded-lg text-app-hint transition hover:bg-violet-500/10 hover:text-violet-400" type="button" data-action="download-deck" data-deck-id="${escapeHtml(deck.id)}" title="Завантажити .apkg" aria-label="Завантажити .apkg ${escapeHtml(deck.title)}">
+              <i data-lucide="download" class="h-3.5 w-3.5" aria-hidden="true"></i>
+            </button>
+            <button class="action-button flex h-7 w-7 items-center justify-center rounded-lg text-app-hint transition hover:bg-red-500/10 hover:text-red-500" type="button" data-action="delete-deck" data-deck-id="${escapeHtml(deck.id)}" title="Видалити колоду" aria-label="Видалити ${escapeHtml(deck.title)}">
+              <i data-lucide="trash-2" class="h-3.5 w-3.5" aria-hidden="true"></i>
             </button>
           </div>
         </div>
@@ -699,6 +1038,8 @@ function showDeckList() {
   appState.editorDeckId = null;
   appState.editorCardId = null;
   elements.editorPanel.classList.add('hidden');
+  elements.deckWindow.classList.add('hidden');
+  elements.deckWindow.classList.remove('flex');
   elements.deckListPanel.classList.remove('hidden');
   renderDecks();
 }
@@ -709,11 +1050,14 @@ function openEditor(deckId) {
   appState.activeDeckId = deck.id;
   appState.editorDeckId = deck.id;
   appState.editorCardId = deck.cards[0]?.id || null;
-  elements.deckListPanel.classList.add('hidden');
+  elements.deckListPanel.classList.remove('hidden');
   elements.editorPanel.classList.remove('hidden');
+  elements.deckWindow.classList.remove('hidden');
+  elements.deckWindow.classList.add('flex');
+  selectDeckTab('cards');
   renderEditor();
   renderDecks();
-  if (!desktopQuery.matches) openDrawer();
+  if (!desktopQuery.matches) closeDrawer();
 }
 
 /** Короткий підпис картки для списку: перше непорожнє поле. */
@@ -743,16 +1087,14 @@ function renderFieldInputs(names, values, disabled) {
 }
 
 /**
- * Активний стиль колоди або null, якщо бібліотека порожня.
+ * Активний стиль колоди або null, якщо стиль не вибрано.
  *
  * CSS для .apkg, прев'ю й редактора береться саме з нього: одне
  * джерело істини, тому «стиль у списку» та «стиль, який бачить
  * користувач» не можуть розійтися.
  */
 function activeDeckStyle(deck) {
-  const styles = deck && deck.styles ? deck.styles : { activeId: '', items: [] };
-  const items = Array.isArray(styles.items) ? styles.items : [];
-  return items.find(item => item.id === styles.activeId) || null;
+  return findLibraryStyle(deck && deck.styleId);
 }
 
 function deckStyleName(deck) {
@@ -760,19 +1102,18 @@ function deckStyleName(deck) {
   return style ? style.name : 'Стиль не вибрано';
 }
 
-/** Застосувати стиль до колоди: CSS і бібліотека йдуть у паузі. */
-function setActiveDeckStyle(deck, styleId) {
-  const styles = deck && deck.styles ? deck.styles : { activeId: '', items: [] };
-  const items = Array.isArray(styles.items) ? styles.items : [];
-  const style = items.find(item => item.id === styleId);
-  if (!style) return false;
-  deck.styles = { ...styles, activeId: style.id };
+/** Прив'язати стиль до колоди: CSS колоди стає знімком стилю. */
+function applyStyleToDeck(deck, styleId) {
+  const style = findLibraryStyle(styleId);
+  if (!deck || !style) return false;
+  deck.styleId = style.id;
   deck.modelCss = style.css;
+  deck.updatedAt = Date.now();
   return true;
 }
 
 /**
- * Розкриває панель стилю колоди.
+ * Розкриває панель CSS у вкладці «Стиль».
  *
  * classList.toggle повертає новий стан, тобто після перемикання true —
  * панель схована. Тому «відкрита» = стан, коли 'hidden' уже знято.
@@ -781,6 +1122,30 @@ function toggleDeckStylePanel() {
   const isOpen = elements.deckStylePanel.classList.toggle('hidden') === false;
   elements.deckStyleToggle.setAttribute('aria-expanded', String(isOpen));
   elements.deckStyleChevron.classList.toggle('rotate-180', isOpen);
+}
+
+/** Перемикання вкладок великого вікна колоди. */
+function selectDeckTab(tab) {
+  const panes = {
+    cards: elements.deckCardsPane,
+    style: elements.deckStylePane,
+    settings: elements.deckSettingsPane
+  };
+  const tabs = {
+    cards: elements.deckTabCards,
+    style: elements.deckTabStyle,
+    settings: elements.deckTabSettings
+  };
+  for (const name of Object.keys(panes)) {
+    const pane = panes[name];
+    const button = tabs[name];
+    if (pane) pane.classList.toggle('hidden', name !== tab);
+    if (button) {
+      button.classList.toggle('is-active', name === tab);
+      button.setAttribute('aria-selected', String(name === tab));
+    }
+  }
+  if (tab === 'style') renderDeckStyleList();
 }
 
 function renderEditor() {
@@ -799,7 +1164,8 @@ function renderEditor() {
   // повідомлення. Значення оновлюємо для іншої колоди, після явного
   // збереження і коли сервер присив колоду — тобто лише тоді, коли в
   // textarea немає незбережених правок.
-  const cssValue = deck.modelCss || '';
+  const activeStyle = activeDeckStyle(deck);
+  const cssValue = activeStyle ? activeStyle.css : (deck.modelCss || '');
   const sameDeck = elements.editorModelCss.dataset.deckId === deck.id;
   if (!sameDeck || (!isDeckStyleDirty() && elements.editorModelCss.value !== cssValue)) {
     elements.editorModelCss.value = cssValue;
@@ -807,6 +1173,16 @@ function renderEditor() {
     setDeckStyleSaved();
   }
   elements.editorStyleName.textContent = deckStyleName(deck);
+  if (elements.deckStyleNameInput) {
+    elements.deckStyleNameInput.value = activeStyle ? activeStyle.name : '';
+  }
+  if (elements.deckSettingsCardCount) {
+    elements.deckSettingsCardCount.textContent = String(deck.cards.length);
+  }
+  if (elements.deckSettingsStyleName) {
+    elements.deckSettingsStyleName.textContent = deckStyleName(deck);
+  }
+  renderDeckStyleList();
   refreshIcons(elements.editorFields);
 
   if (!deck.cards.length) {
@@ -819,6 +1195,7 @@ function renderEditor() {
     elements.deleteCardButton.disabled = true;
     elements.saveCardButton.disabled = true;
     elements.clearDeckButton.disabled = true;
+    if (elements.deckSettingsPreviewButton) elements.deckSettingsPreviewButton.disabled = true;
     return;
   }
 
@@ -834,6 +1211,7 @@ function renderEditor() {
   elements.deleteCardButton.disabled = false;
   elements.saveCardButton.disabled = false;
   elements.clearDeckButton.disabled = false;
+  if (elements.deckSettingsPreviewButton) elements.deckSettingsPreviewButton.disabled = false;
 }
 
 function navigateEditorCard(direction) {
@@ -861,11 +1239,9 @@ async function saveEditorCard() {
   const card = deck?.cards.find(item => item.id === appState.editorCardId);
   if (!deck || !card) return;
   card.values = readFieldInputs();
-  // CSS їде разом із карткою, але на сервер потрапляє окремим запитом:
-  // PUT /api/notes/{id} оновлює лише значення полів, тож без цього кроку
-  // стиль залишився б лише в localStorage до наступного повного збереження.
-  const cssChanged = deck.modelCss !== elements.editorModelCss.value;
-  deck.modelCss = elements.editorModelCss.value;
+  // Стиль колоди зберігається окремою кнопкою у вкладці «Стиль». Раніше
+  // CSS їхав побічним ефектом «Зберегти картку», через що незбережені
+  // правки textarea могли затерти стиль усіх колод акаунта.
   deck.updatedAt = Date.now();
   saveDecksLocally();
   renderDecks();
@@ -877,7 +1253,6 @@ async function saveEditorCard() {
   // покласти. Без нього запит падав би 404, і карка зникла б разом із
   // перезавантаженням сторінки.
   await persistCardToServer(deck, card);
-  if (cssChanged) await saveDeckStyleToServer();
 }
 
 function isDeckStyleDirty() {
@@ -896,86 +1271,205 @@ function markDeckStyleDirty() {
   elements.saveDeckStyleButton.setAttribute('title', 'Є незбережені зміни стилю');
 }
 
-/** Відправляє лише метадані колоди: CSS, назви полів, шаблони. */
-async function saveDeckStyleToServer() {
+/**
+ * CSS, що прийшов із чату, стає стилем спільної бібліотеки.
+ *
+ * Раніше цей CSS записувався лише в колоду. Тепер він або оновлює
+ * активний стиль (і всі колоди з ним), або створює новий — інакше
+ * після переходу на бібліотеку він лишився б поза нею й зник би з
+ * першою ж синхронізацією.
+ */
+/**
+ * CSS із чату для щойно створеної колоди.
+ *
+ * Не можна переписувати «Основний»: він спільний, і зміна зачепила б усі
+ * інші колоди. Якщо такий самий CSS уже є в бібліотеці (наприклад, це
+ * обраний для Gemini стиль) — перевикористовуємо його, інакше створюємо
+ * окремий стиль лише для цієї колоди.
+ */
+async function applyFreshDeckModelCss(deck, css) {
+  if (!deck || typeof css !== 'string' || !css.trim()) return;
+  const existing = styleLibrary().find(style => style.css === css);
+  if (existing) {
+    applyStyleToDeck(deck, existing.id);
+    saveDecksLocally();
+    return;
+  }
+  await createLibraryStyle(uniqueStyleName('Стиль з чату'), css, { applyToDeckId: deck.id });
+}
+
+function setDeckModelCss(deck, css) {
+  if (!deck || typeof css !== 'string' || !css.trim()) return;
+  const style = activeDeckStyle(deck);
+  if (style) {
+    style.css = css;
+    style.updatedAt = Date.now();
+    applyStyleToBoundDecks(style);
+    saveStylesLocally();
+    persistStyleToServer(style);
+    return;
+  }
+  const created = {
+    id: createId(),
+    name: uniqueStyleName('Стиль з чату'),
+    css,
+    updatedAt: Date.now()
+  };
+  appState.styleLibrary = [...styleLibrary(), created];
+  appState.selectedStyleId = created.id;
+  deck.styleId = created.id;
+  deck.modelCss = css;
+  saveStylesLocally();
+  persistStyleToServer(created, { create: true });
+}
+
+/**
+ * Зберігає CSS/назву активного стилю колоди.
+ *
+ * Стиль спільний для акаунта, тому зміна тут застосовується до всіх
+ * колод із тим самим styleId. Саме це виправляє стару поведінку, коли
+ * колоду з картками не можна було перестилізувати: стиль більше не
+ * належить картці чи колоді, а є окремим рядком бібліотеки.
+ */
+async function saveDeckStyle() {
   const deck = appState.decks.find(item => item.id === appState.editorDeckId);
   if (!deck) return;
+  const css = elements.editorModelCss.value;
+  const requestedName = String(elements.deckStyleNameInput?.value || '').trim().slice(0, 60);
+  let style = activeDeckStyle(deck);
+
+  if (style) {
+    const duplicate = findLibraryStyleByName(requestedName);
+    if (requestedName && duplicate && duplicate.id !== style.id) {
+      showToast('Стиль із такою назвою вже є', 'error');
+      return;
+    }
+    style.css = css;
+    if (requestedName) style.name = requestedName;
+    style.updatedAt = Date.now();
+    applyStyleToBoundDecks(style);
+    saveStylesLocally();
+    saveDecksLocally();
+    setDeckStyleSaved();
+    renderStyleList();
+    renderDeckStyleList();
+    renderGenerationStyleList();
+    renderDecks();
+    if (appState.editorDeckId === deck.id) elements.editorStyleName.textContent = deckStyleName(deck);
+    haptic('success');
+    showToast('Стиль оновлено для всіх його колод');
+    await persistStyleToServer(style);
+    return;
+  }
+
+  const created = await createLibraryStyle(requestedName || uniqueStyleName('Мій стиль'), css);
+  if (!created) return;
+  applyStyleToDeck(deck, created.id);
+  saveDecksLocally();
+  setDeckStyleSaved();
+  elements.editorStyleName.textContent = deckStyleName(deck);
+  elements.deckStyleNameInput.value = created.name;
+  renderDeckStyleList();
+  renderDecks();
+  haptic('success');
+  showToast(`Стиль «${created.name}» створено`);
   try {
-    await apiRequestJson('/api/decks', {
-      method: 'POST',
-      body: JSON.stringify(deckToServerPayload(deck))
-    });
+    await pushDeckToServer(deck);
     setStorageStatus('Синхронізовано з акаунтом', 'remote');
   } catch (error) {
     setStorageStatus('Стиль збережено локально, сервер недоступний', 'error');
   }
 }
 
-/**
- * CSS колоди і CSS активного стилю — завжди одне й те саме.
- *
- * Розводити їх не можна: після перезавантаження migrateDeck бере CSS саме
- * з активного стилю, тож правило, записане лише в deck.modelCss, зникло б
- * навіть у localStorage, не дійшовши до Anki.
- */
-function setDeckModelCss(deck, css) {
-  if (!deck || !css) return;
-  const styles = ensureStyleLibrary(deck);
-  const active = styles.items.find(item => item.id === styles.activeId) || styles.items[0];
-  deck.modelCss = css;
-  if (active) active.css = css;
-}
-
-/**
- * Зберігає стиль усієї колоди — незалежно від відкритої картки.
- *
- * Окрема кнопка, бо раніше CSS був побічним ефектом «Зберегти картку»:
- * змінити стиль колоди без картки було неможливо, а на сервер він і
- * зовсім не доїжджав.
- */
-async function saveDeckStyle() {
-  const deck = appState.decks.find(item => item.id === appState.editorDeckId);
-  if (!deck) return;
-  setDeckModelCss(deck, elements.editorModelCss.value);
-  deck.updatedAt = Date.now();
-  saveDecksLocally();
-  setDeckStyleSaved();
-  haptic('success');
-  showToast('Стиль колоди збережено');
-  await saveDeckStyleToServer();
-}
-
-// --- БІБЛІОТЕКА СТИЛІВ ---
+// --- БІБЛІОТЕКА СТИЛІВ АКАУНТА ---
 //
-// Один стиль — один CSS на всі поля колоди. Окремих стилів на кожне
-// поле немає свідомо: у колоді їх п'ять, і п'ять копій одного правила
-// в списку означали б п'ять однакових стилів, які треба тримати
-// синхронними вручну (і Anki отримав би п'ять однакових правил у CSS).
+// Один стиль — один CSS на всі поля. Стилі не групуються за колодами:
+// «Темний» існує в акаунті один раз, і його можна застосувати будь-де.
 
-function styleLibrary(deck) {
-  const styles = deck && deck.styles ? deck.styles : { activeId: '', items: [] };
-  return Array.isArray(styles.items) ? styles.items : [];
+async function createLibraryStyle(name, css, { applyToDeckId = null } = {}) {
+  const clean = String(name || '').trim().slice(0, 60);
+  if (!clean) {
+    showToast('Впишіть назву стилю', 'error');
+    return null;
+  }
+  if (findLibraryStyleByName(clean)) {
+    showToast('Стиль із такою назвою вже є', 'error');
+    return null;
+  }
+  const style = { id: createId(), name: clean, css: String(css || ''), updatedAt: Date.now() };
+  appState.styleLibrary = [...styleLibrary(), style];
+  appState.selectedStyleId = style.id;
+  saveStylesLocally();
+  if (applyToDeckId) {
+    const deck = appState.decks.find(item => item.id === applyToDeckId);
+    if (deck) applyStyleToDeck(deck, style.id);
+    saveDecksLocally();
+  }
+  renderStyleList();
+  renderDeckStyleList();
+  renderGenerationStyleList();
+  await persistStyleToServer(style, { create: true });
+  return style;
 }
 
-function ensureStyleLibrary(deck) {
-  // Колода без стилів (створена до бібліотеки) отримує один стиль із
-  // поточним CSS — інакше список стилів був би порожнім, а колода
-  // лишилася б стилізованою поза бібліотекою.
-  if (styleLibrary(deck).length) return deck.styles;
-  const item = { id: createId(), name: 'Основний', css: deck.modelCss || '' };
-  deck.styles = { activeId: item.id, items: [item] };
-  deck.modelCss = item.css;
-  return deck.styles;
+/** Вибір стилю в бібліотеці для редагування назви/CSS. */
+function selectStyleForEditing(styleId, { render = true } = {}) {
+  const style = findLibraryStyle(styleId);
+  appState.selectedStyleId = style ? style.id : null;
+  if (elements.styleEditorWrap) {
+    elements.styleEditorWrap.classList.toggle('hidden', !style);
+  }
+  if (style) {
+    elements.styleEditorName.value = style.name;
+    elements.styleEditorCss.value = style.css;
+  }
+  if (render) renderStyleList();
+  return style;
 }
 
-function openStyleModal() {
-  const deck = appState.decks.find(item => item.id === appState.editorDeckId);
-  if (!deck) return;
-  appState.styleDeckId = deck.id;
-  ensureStyleLibrary(deck);
-  elements.styleModalDeckName.textContent = deck.title;
+async function saveStyleEditor() {
+  const style = findLibraryStyle(appState.selectedStyleId);
+  if (!style) return false;
+  const name = String(elements.styleEditorName.value || '').trim().slice(0, 60);
+  if (!name) {
+    showToast('Впишіть назву стилю', 'error');
+    elements.styleEditorName.focus();
+    return false;
+  }
+  const duplicate = findLibraryStyleByName(name);
+  if (duplicate && duplicate.id !== style.id) {
+    showToast('Стиль із такою назвою вже є', 'error');
+    return false;
+  }
+  style.name = name;
+  style.css = elements.styleEditorCss.value;
+  style.updatedAt = Date.now();
+  applyStyleToBoundDecks(style);
+  saveStylesLocally();
+  saveDecksLocally();
+  renderStyleList();
+  renderDeckStyleList();
+  renderGenerationStyleList();
+  if (appState.editorDeckId) renderEditor();
+  haptic('success');
+  showToast('Стиль оновлено для всього акаунта');
+  await persistStyleToServer(style);
+  return true;
+}
+
+function openStyleModal(deckId) {
+  // openStylesButton викликає функцію напряму, тож сюди може прийти подія.
+  if (typeof deckId !== 'string') deckId = appState.editorDeckId || null;
+  const deck = appState.decks.find(item => item.id === deckId) || null;
+  appState.styleDeckId = deck ? deck.id : null;
+  elements.styleModalDeckName.textContent = deck
+    ? `Колода: ${deck.title}`
+    : 'Спільна для всіх колод акаунта';
   elements.newStyleName.value = '';
-  appState.renamingStyleId = null;
+  const preferred = findLibraryStyle(appState.selectedStyleId)
+    ? appState.selectedStyleId
+    : (deck && deck.styleId) || styleLibrary()[0]?.id || '';
+  selectStyleForEditing(preferred, { render: false });
   renderStyleList();
   elements.styleModal.classList.remove('hidden');
   elements.styleModal.classList.add('flex');
@@ -988,216 +1482,203 @@ function closeStyleModal() {
   elements.styleModal.classList.add('hidden');
   elements.styleModal.classList.remove('flex');
   appState.styleDeckId = null;
-  appState.renamingStyleId = null;
 }
 
 function renderStyleList() {
-  const deck = appState.decks.find(item => item.id === appState.styleDeckId);
-  if (!deck) return;
-  const items = styleLibrary(deck);
-  if (!items.length) {
-    elements.styleList.innerHTML = '<p class="rounded-xl border border-dashed border-app-hint/20 px-3 py-4 text-center text-xs text-app-hint">У колоді ще немає стилів. Напишіть CSS і додайте стиль унизу.</p>';
+  const list = elements.styleList;
+  if (!list) return;
+  const deck = appState.decks.find(item => item.id === appState.styleDeckId) || null;
+  const styles = styleLibrary();
+  if (!styles.length) {
+    list.innerHTML = '<p class="rounded-xl border border-dashed border-app-hint/20 px-3 py-4 text-center text-xs text-app-hint">Бібліотека порожня. Створіть перший стиль — він стане спільним для всіх колод.</p>';
     return;
   }
-  const activeId = deck.styles.activeId;
-  elements.styleList.innerHTML = items.map((item) => {
-    const isActive = item.id === activeId;
-    const renaming = appState.renamingStyleId === item.id;
-    const head = `
-      <span class="flex min-w-0 items-center gap-2">
-        <span class="truncate text-sm font-bold">${escapeHtml(item.name)}</span>
-        ${isActive ? '<span class="style-badge">активний</span>' : ''}
-      </span>`;
-    const body = renaming
-      ? `<span class="flex items-center gap-2">
-          <input class="field-control" type="text" maxlength="60" value="${escapeHtml(item.name)}" data-style-name-input="${escapeHtml(item.id)}" aria-label="Нова назва стилю">
-          <button class="icon-button border muted-surface border-app-hint/10" type="button" data-action="save-style-name" data-style-id="${escapeHtml(item.id)}" aria-label="Зберегти назву">
-            <i data-lucide="check" class="h-4 w-4 text-emerald-500" aria-hidden="true"></i>
+  list.innerHTML = styles.map((style) => {
+    const bound = Boolean(deck && deck.styleId === style.id);
+    const generation = appState.generationStyleId === style.id;
+    const selected = appState.selectedStyleId === style.id;
+    return `
+      <div class="style-item ${bound || selected ? 'is-active' : ''}" data-style-id="${escapeHtml(style.id)}">
+        <button class="style-item-main" type="button" data-action="edit-style" data-style-id="${escapeHtml(style.id)}" aria-label="Редагувати стиль ${escapeHtml(style.name)}">
+          <span class="flex min-w-0 flex-col items-start gap-1">
+            <span class="flex min-w-0 items-center gap-1.5">
+              <span class="truncate text-sm font-bold">${escapeHtml(style.name)}</span>
+              ${bound ? '<span class="style-badge">у колоді</span>' : ''}
+              ${generation ? '<span class="style-badge">Gemini</span>' : ''}
+            </span>
+            <span class="style-option-preview" aria-hidden="true">${styleColorSwatches(style.css)}</span>
+          </span>
+        </button>
+        <span class="flex items-center gap-1">
+          ${deck ? `<button class="icon-button border muted-surface border-app-hint/10" type="button" data-action="apply-style" data-style-id="${escapeHtml(style.id)}" aria-label="Застосувати стиль до колоди" title="Застосувати до колоди">
+            <i data-lucide="paint-bucket" class="h-3.5 w-3.5" aria-hidden="true"></i>
+          </button>` : ''}
+          <button class="icon-button border muted-surface border-app-hint/10" type="button" data-action="generation-style" data-style-id="${escapeHtml(style.id)}" aria-label="Обрати стиль для Gemini" title="Стиль для нових карток Gemini">
+            <i data-lucide="${generation ? 'check' : 'sparkles'}" class="h-3.5 w-3.5 ${generation ? 'text-emerald-500' : ''}" aria-hidden="true"></i>
           </button>
-          <button class="icon-button border muted-surface border-app-hint/10" type="button" data-action="cancel-rename-style" data-style-id="${escapeHtml(item.id)}" aria-label="Скасувати">
-            <i data-lucide="x" class="h-4 w-4" aria-hidden="true"></i>
-          </button>
-        </span>`
-      : `<span class="flex items-center gap-1">
-          <button class="icon-button border muted-surface border-app-hint/10" type="button" data-action="rename-style" data-style-id="${escapeHtml(item.id)}" aria-label="Перейменувати стиль">
-            <i data-lucide="pencil" class="h-3.5 w-3.5" aria-hidden="true"></i>
-          </button>
-          <button class="icon-button border muted-surface border-app-hint/10 disabled:opacity-40" type="button" data-action="delete-style" data-style-id="${escapeHtml(item.id)}" aria-label="Видалити стиль" ${items.length < 2 ? 'disabled' : ''}>
+          <button class="icon-button border muted-surface border-app-hint/10" type="button" data-action="delete-style" data-style-id="${escapeHtml(style.id)}" aria-label="Видалити стиль" title="Видалити стиль">
             <i data-lucide="trash-2" class="h-3.5 w-3.5" aria-hidden="true"></i>
           </button>
-        </span>`;
-    return `
-      <div class="style-item ${isActive ? 'is-active' : ''}" data-style-id="${escapeHtml(item.id)}">
-        ${renaming ? body : `<button class="style-item-main" type="button" data-action="apply-style" data-style-id="${escapeHtml(item.id)}">${head}</button>${body}`}
+        </span>
       </div>`;
   }).join('');
-  refreshIcons(elements.styleList);
+  refreshIcons(list);
 }
 
-/**
- * Поле перейменування у рядку стилю, якщо воно відкрите.
- *
- * Шукаємо рядком, а не через CSS.escape: id стилю — довільний рядок
- * (в базі це звичайний jsonb, а не uuid), тож селектор за ним довелося
- * б екранувати щоразу на кожному кліку.
- */
-function styleNameInputValue(styleId) {
-  const rows = elements.styleList.querySelectorAll('.style-item');
-  for (const row of rows) {
-    if (row.getAttribute('data-style-id') !== styleId) continue;
-    const input = row.querySelector('[data-style-name-input]');
-    if (input) return String(input.value || '');
+/** Список стилів у вкладці «Стиль» великого вікна колоди. */
+function renderDeckStyleList() {
+  const list = elements.deckStyleList;
+  if (!list) return;
+  const deck = appState.decks.find(item => item.id === appState.editorDeckId);
+  if (!deck) {
+    list.innerHTML = '';
+    return;
   }
-  return '';
+  const styles = styleLibrary();
+  if (!styles.length) {
+    list.innerHTML = '<p class="rounded-xl border border-dashed border-app-hint/20 px-3 py-4 text-center text-xs text-app-hint">Стилів ще немає. Створіть перший — він стане спільним для всіх колод.</p>';
+    return;
+  }
+  list.innerHTML = styles.map((style) => {
+    const active = deck.styleId === style.id;
+    const generation = appState.generationStyleId === style.id;
+    return `
+      <div class="style-item ${active ? 'is-active' : ''}" data-style-id="${escapeHtml(style.id)}">
+        <button class="style-item-main" type="button" data-action="apply-deck-style" data-style-id="${escapeHtml(style.id)}" aria-label="Застосувати стиль ${escapeHtml(style.name)} до колоди">
+          <span class="flex min-w-0 flex-col items-start gap-1">
+            <span class="flex min-w-0 items-center gap-1.5">
+              <span class="truncate text-sm font-bold">${escapeHtml(style.name)}</span>
+              ${active ? '<span class="style-badge">активний</span>' : ''}
+              ${generation ? '<span class="style-badge">Gemini</span>' : ''}
+            </span>
+            <span class="style-option-preview" aria-hidden="true">${styleColorSwatches(style.css)}</span>
+          </span>
+        </button>
+        <button class="icon-button border muted-surface border-app-hint/10" type="button" data-action="generation-deck-style" data-style-id="${escapeHtml(style.id)}" aria-label="Обрати стиль для Gemini" title="Стиль для нових карток Gemini">
+          <i data-lucide="${generation ? 'check' : 'sparkles'}" class="h-3.5 w-3.5 ${generation ? 'text-emerald-500' : ''}" aria-hidden="true"></i>
+        </button>
+      </div>`;
+  }).join('');
+  refreshIcons(list);
 }
 
-function startStyleRename(styleId) {
-  appState.renamingStyleId = styleId;
-  renderStyleList();
-  const rows = elements.styleList.querySelectorAll('.style-item');
-  for (const row of rows) {
-    const input = row.querySelector('[data-style-name-input]');
-    if (input) {
-      input.focus();
-      input.select();
-      break;
-    }
-  }
-}
-
-/** Перейменування стилю — окремо від застосування. */
-function commitStyleRename(styleId, name) {
-  const deck = appState.decks.find(item => item.id === appState.styleDeckId);
-  const clean = String(name || '').trim().slice(0, 60);
-  if (!deck || !clean) {
-    renderStyleList();
-    return false;
-  }
-  deck.styles = {
-    ...deck.styles,
-    items: deck.styles.items.map(item => (item.id === styleId ? { ...item, name: clean } : item))
-  };
-  appState.renamingStyleId = null;
-  deck.updatedAt = Date.now();
+/** Застосування стилю до колоди зі списку у вікні колоди. */
+async function applyDeckStyleToEditor(styleId) {
+  const deck = appState.decks.find(item => item.id === appState.editorDeckId);
+  const style = findLibraryStyle(styleId);
+  if (!deck || !style) return;
+  applyStyleToDeck(deck, styleId);
+  setDeckStyleSaved();
+  elements.editorModelCss.value = style.css;
+  elements.editorStyleName.textContent = deckStyleName(deck);
+  elements.deckStyleNameInput.value = style.name;
   saveDecksLocally();
+  renderDeckStyleList();
   renderStyleList();
-  if (appState.editorDeckId === deck.id) elements.editorStyleName.textContent = deckStyleName(deck);
-  saveDeckStyleToServer();
+  renderDecks();
   haptic('success');
-  showToast('Назву стилю змінено');
-  return true;
+  showToast(`Застосовано стиль «${style.name}»`);
+  try {
+    await pushDeckToServer(deck);
+    setStorageStatus('Синхронізовано з акаунтом', 'remote');
+  } catch (error) {
+    setStorageStatus('Стиль застосовано локально, сервер недоступний', 'error');
+  }
 }
 
 /**
- * Застосування збереженого стилю.
+ * Застосування стилю з бібліотеки.
  *
- * CSS береться зі стилю, а не навпаки: застосування не має права
- * перезаписати те, що користувач не зберігав. Якщо в textarea є
- * незбережені правки, їх переносимо в новий стиль — інакше вони
- * просто зникли б разом зі зміною стилю.
+ * Якщо бібліотека відкрита з колоди — стиль одразу до неї й
+ * застосовується. Без колоди дія лише відкриває стиль для редагування.
  */
 async function applyDeckStyle(styleId) {
+  const style = findLibraryStyle(styleId);
+  if (!style) return;
   const deck = appState.decks.find(item => item.id === appState.styleDeckId);
-  if (!deck) return;
-  const target = deck.styles.items.find(item => item.id === styleId);
-  if (!target) return;
-
-  const edited = elements.editorModelCss.value;
-  const previous = activeDeckStyle(deck);
-  if (isDeckStyleDirty() && previous && previous.id !== styleId) {
-    deck.styles = {
-      ...deck.styles,
-      items: deck.styles.items.map(item => (item.id === previous.id ? { ...item, css: edited } : item))
-    };
-    showToast('Правки збережено в попередньому стилі');
+  if (!deck) {
+    selectStyleForEditing(styleId);
+    return;
   }
-  if (!setActiveDeckStyle(deck, styleId)) return;
-  deck.updatedAt = Date.now();
-  saveDecksLocally();
-  setDeckStyleSaved();
-  elements.editorModelCss.value = deck.modelCss;
-  elements.editorStyleName.textContent = deckStyleName(deck);
+  await applyDeckStyleToEditor(styleId);
   renderStyleList();
-  renderDecks();
-  haptic('success');
-  showToast(`Застосовано стиль «${target.name}»`);
-  await saveDeckStyleToServer();
 }
 
-/** Новий стиль із поточного CSS редактора. */
+/** Новий стиль із форми бібліотеки. */
 async function createDeckStyle() {
-  const deck = appState.decks.find(item => item.id === appState.styleDeckId);
-  if (!deck) return;
-  const name = String(elements.newStyleName.value || '').trim().slice(0, 60);
-  if (!name) {
-    showToast('Впишіть назву стилю', 'error');
+  const name = String(elements.newStyleName.value || '').trim();
+  // Джерело CSS залежить від контексту: у вікні колоди це її редактор,
+  // у бібліотеці без колоди — поле редагування обраного стилю. Інакше
+  // «створити з CSS» брало б CSS останньої відкритої колоди.
+  const css = String(appState.styleDeckId
+    ? (elements.editorModelCss?.value || '')
+    : (elements.styleEditorCss?.value || ''));
+  const targetDeckId = appState.styleDeckId || appState.editorDeckId || null;
+  const created = await createLibraryStyle(name, css, { applyToDeckId: targetDeckId });
+  if (!created) {
     elements.newStyleName.focus();
-    return;
+    return null;
   }
-  if (styleLibrary(deck).some(item => item.name.toLowerCase() === name.toLowerCase())) {
-    showToast('Стиль із такою назвою вже є', 'error');
-    return;
-  }
-  const previous = activeDeckStyle(deck);
-  const edited = elements.editorModelCss.value;
-  if (isDeckStyleDirty() && previous) {
-    deck.styles = {
-      ...deck.styles,
-      items: deck.styles.items.map(item => (item.id === previous.id ? { ...item, css: edited } : item))
-    };
-  }
-  // Новий стиль — це те, що користувач бачить на екрані, а не останнє
-  // збережене: інакше кнопка «Зберегти поточний CSS» створювала б копію
-  // попереднього стилю, а правки зникали б разом із натисканням.
-  const item = { id: createId(), name, css: edited };
-  deck.styles = { ...deck.styles, activeId: item.id, items: [...styleLibrary(deck), item] };
-  deck.modelCss = item.css;
-  deck.updatedAt = Date.now();
-  saveDecksLocally();
-  setDeckStyleSaved();
   elements.newStyleName.value = '';
-  elements.editorStyleName.textContent = deckStyleName(deck);
-  renderStyleList();
-  renderDecks();
+  selectStyleForEditing(created.id);
+  const deck = appState.decks.find(item => item.id === appState.editorDeckId);
+  if (deck) {
+    elements.editorStyleName.textContent = deckStyleName(deck);
+    if (elements.deckStyleNameInput) elements.deckStyleNameInput.value = created.name;
+    elements.editorModelCss.value = created.css;
+    renderDeckStyleList();
+    try {
+      await pushDeckToServer(deck);
+    } catch (error) {
+      setStorageStatus('Стиль збережено локально, сервер недоступний', 'error');
+    }
+  }
   haptic('success');
-  showToast(`Стиль «${name}» збережено`);
-  await saveDeckStyleToServer();
+  showToast(`Стиль «${created.name}» збережено`);
+  return created;
 }
 
 /**
- * Видалення стилю.
+ * Видалення стилю з бібліотеки.
  *
- * Останній стиль не видаляється: колода без жодного стилю не має
- * CSS для .apkg, і користувач не зміг би її відновити. Активним після
- * видалення стає перший із решти — інакше колода лишилася б без
- * стилю, який можна редагувати.
+ * Колоди не видаляються: у них лишається css-знімок, а styleId
+ * очищується (на сервері це ON DELETE SET NULL).
  */
 function requestDeleteDeckStyle(styleId) {
-  const deck = appState.decks.find(item => item.id === appState.styleDeckId);
-  if (!deck) return;
-  const style = deck.styles.items.find(item => item.id === styleId);
+  const style = findLibraryStyle(styleId);
   if (!style) return;
-  if (styleLibrary(deck).length < 2) {
-    showToast('Має лишитися хоча б один стиль', 'error');
-    return;
-  }
-  openConfirmModal('Видалити стиль?', `Стиль “${style.name}” буде видалено з колоди “${deck.title}”.`, async () => {
-    const items = styleLibrary(deck).filter(item => item.id !== styleId);
-    const wasActive = deck.styles.activeId === styleId;
-    deck.styles = { activeId: wasActive ? items[0].id : deck.styles.activeId, items };
-    deck.updatedAt = Date.now();
-    if (wasActive) {
-      deck.modelCss = items[0].css;
-      elements.editorModelCss.value = deck.modelCss;
-      setDeckStyleSaved();
+  const bound = appState.decks.filter(deck => deck.styleId === styleId);
+  const suffix = bound.length
+    ? ` Він відв'яжеться від ${bound.length} ${pluralizeDecks(bound.length)}, а їхній CSS лишиться знімком.`
+    : '';
+  openConfirmModal('Видалити стиль?', `Стиль “${style.name}” зникне з бібліотеки акаунта.${suffix}`, async () => {
+    appState.styleLibrary = styleLibrary().filter(item => item.id !== styleId);
+    for (const deck of bound) {
+      deck.styleId = '';
+      deck.updatedAt = Date.now();
     }
+    if (appState.generationStyleId === styleId) {
+      appState.generationStyleId = '';
+      saveGenerationStyleId('');
+    }
+    if (appState.selectedStyleId === styleId) {
+      selectStyleForEditing(styleLibrary()[0]?.id || '', { render: false });
+    }
+    saveStylesLocally();
     saveDecksLocally();
     renderStyleList();
-    if (appState.editorDeckId === deck.id) elements.editorStyleName.textContent = deckStyleName(deck);
+    renderDeckStyleList();
+    renderGenerationStyleList();
+    if (appState.editorDeckId) renderEditor();
     renderDecks();
     haptic('success');
     showToast('Стиль видалено');
-    await saveDeckStyleToServer();
+    try {
+      await apiRequestJson(`/api/styles/${styleId}`, { method: 'DELETE' });
+      setStorageStatus('Синхронізовано з акаунтом', 'remote');
+    } catch (error) {
+      setStorageStatus('Видалено локально, сервер недоступний', 'error');
+    }
   });
 }
 
@@ -1320,16 +1801,39 @@ function requestDeleteCard() {
   });
 }
 
+/**
+ * Спільний стиль за замовчуванням для нової колоди.
+ *
+ * Повторно використовує «Основний», якщо він уже є в бібліотеці акаунта:
+ * інакше кожна нова колода плодила б однойменну копію, і зміна стилю в
+ * одній не застосовувалася б до інших. Створений стиль одразу потрапляє
+ * в бібліотеку, тож колода має справжній styleId, а не локальний знімок.
+ */
+function defaultLibraryStyle(css) {
+  const existing = findLibraryStyleByName('Основний');
+  if (existing) return existing;
+  const style = {
+    id: createId(),
+    name: uniqueStyleName('Основний'),
+    css,
+    updatedAt: Date.now()
+  };
+  appState.styleLibrary = [...styleLibrary(), style];
+  saveStylesLocally();
+  return style;
+}
+
 function createDeck(title, fieldNames, parentId = null) {
   const css = '.card {\n  font-family: system-ui, sans-serif;\n  font-size: 20px;\n  text-align: center;\n}';
-  // Нова колода одразу має стиль: інакше вікно стилів показувало б
-  // порожній список, а користувач не зміг би додати перший.
-  const style = { id: createId(), name: 'Основний', css };
+  // Нова колода одразу прив'язана до спільного стилю акаунта: так у
+  // вікні колоди видно назву й CSS, а зміна стилю працює для всіх колод.
+  const style = defaultLibraryStyle(css);
   const deck = {
     id: createId(),
     parentId: parentId || null,
     title: title.trim(),
-    modelCss: css,
+    styleId: style.id,
+    modelCss: style.css,
     styles: { activeId: style.id, items: [style] },
     templates: [],
     fieldNames: sanitizeFieldNames(fieldNames).length ? sanitizeFieldNames(fieldNames) : DEFAULT_FIELD_NAMES.slice(),
@@ -1524,27 +2028,15 @@ function saveGenerationStyleId(styleId) {
   }
 }
 
-/** Усі стилі всіх колод: [{ deck, style }] — для списку вибору. */
+/** Усі стилі бібліотеки з непорожнім CSS — для списку вибору. */
 function allDeckStyles() {
-  const out = [];
-  for (const deck of appState.decks) {
-    for (const style of styleLibrary(deck)) {
-      if (!style || !style.css) continue;
-      out.push({ deck, style });
-    }
-  }
-  return out;
+  return styleLibrary().filter(style => style && style.css);
 }
 
 /** Обраний стиль як об'єкт або null, коли вибрано «авто». */
 function generationStyle() {
-  const styleId = appState.generationStyleId;
-  if (!styleId) return null;
-  for (const deck of appState.decks) {
-    const style = styleLibrary(deck).find(item => item.id === styleId);
-    if (style && style.css) return { deck, style };
-  }
-  return null;
+  const style = findLibraryStyle(appState.generationStyleId);
+  return style && style.css ? style : null;
 }
 
 function setGenerationStyleId(styleId) {
@@ -1552,46 +2044,42 @@ function setGenerationStyleId(styleId) {
   appState.generationStyleId = next;
   saveGenerationStyleId(next);
   renderGenerationStyleList();
+  renderStyleList();
+  renderDeckStyleList();
   return next;
 }
 
 function generationStyleIdExists(styleId) {
-  return appState.decks.some(deck => styleLibrary(deck).some(item => item.id === styleId));
+  return Boolean(findLibraryStyle(styleId));
 }
 
-/**
- * Підпис на кнопці: назва обраного стилю й колода, якій він належить.
- *
- * Назва колоди тут не для краси: стиль «Основний» є в кожній, і без неї
- * в підписі не зрозуміло, чий стиль зараз діє.
- */
+/** Підпис на кнопці: назва спільного стилю. */
 function generationStyleLabel() {
-  const chosen = generationStyle();
-  if (!chosen) return 'Авто — стиль підбере Gemini';
-  return `${chosen.deck.title} · ${chosen.style.name}`;
+  const style = generationStyle();
+  if (!style) return 'Авто — стиль підбере Gemini';
+  return style.name;
 }
 
 /**
  * Список «стиль для нових карток».
  *
- * Групується за колодами: стиль «Основний» є в кожній, і без назви
- * колоди в підписі вибір у списку з п'яти однакових «Основний» був би
- * нерозбірливим. Порожній id — «авто»: тоді Gemini вигадує оформлення
- * сам, як раніше.
+ * Стилі більше не групуються за колодами: бібліотека спільна, тож
+ * назва стилю вже унікальна в межах акаунта. Порожній id — «авто»:
+ * тоді Gemini вигадує оформлення сам, як раніше.
  */
 function renderGenerationStyleList() {
   const list = elements.generationStyleList;
   const label = elements.generationStyleLabel;
   if (!list) return;
-  // Стиль могли видалити або перенести — тоді показуємо «авто», а не
-  // порожній список, щоб у генерацію не пішов невидимий стиль.
+  // Стиль могли видалити — тоді показуємо «авто», а не порожній список,
+  // щоб у генерацію не пішов невидимий стиль.
   if (appState.generationStyleId && !generationStyleIdExists(appState.generationStyleId)) {
     appState.generationStyleId = '';
     saveGenerationStyleId('');
   }
   if (label) label.textContent = generationStyleLabel();
 
-  const groups = allDeckStyles();
+  const styles = allDeckStyles();
   const autoSelected = !appState.generationStyleId;
   const auto = `
     <button class="style-option ${autoSelected ? 'is-selected' : ''}" type="button" role="option"
@@ -1603,33 +2091,24 @@ function renderGenerationStyleList() {
       </span>
       <i data-lucide="check" class="style-option-check h-4 w-4" aria-hidden="true"></i>
     </button>`;
-  if (!groups.length) {
-    list.innerHTML = `${auto}<p class="px-3 py-4 text-center text-[11px] text-app-hint">Збережених стилів ще немає. Створи стиль у колоді — і він з'явиться тут.</p>`;
+  if (!styles.length) {
+    list.innerHTML = `${auto}<p class="px-3 py-4 text-center text-[11px] text-app-hint">Збережених стилів ще немає. Створіть стиль у бібліотеці — і він з'явиться тут.</p>`;
     refreshIcons(list);
     return;
   }
-  const byDeck = new Map();
-  for (const { deck, style } of groups) {
-    if (!byDeck.has(deck.id)) byDeck.set(deck.id, { title: deck.title, items: [] });
-    byDeck.get(deck.id).items.push(style);
-  }
-  const body = [...byDeck.values()].map(({ title, items }) => `
-    <div class="style-option-group">
-      <p class="style-option-group-label">${escapeHtml(title)}</p>
-      ${items.map(style => {
-        const selected = style.id === appState.generationStyleId;
-        return `
-        <button class="style-option ${selected ? 'is-selected' : ''}" type="button" role="option"
-                aria-selected="${selected}" data-generation-style="${escapeHtml(style.id)}">
-          <span class="style-option-icon"><i data-lucide="paint-bucket" class="h-4 w-4" aria-hidden="true"></i></span>
-          <span class="min-w-0 flex-1">
-            <span class="block truncate text-xs font-bold">${escapeHtml(style.name)}</span>
-            <span class="style-option-preview" aria-hidden="true">${styleColorSwatches(style.css)}</span>
-          </span>
-          <i data-lucide="check" class="style-option-check h-4 w-4" aria-hidden="true"></i>
-        </button>`;
-      }).join('')}
-    </div>`).join('');
+  const body = styles.map(style => {
+    const selected = style.id === appState.generationStyleId;
+    return `
+      <button class="style-option ${selected ? 'is-selected' : ''}" type="button" role="option"
+              aria-selected="${selected}" data-generation-style="${escapeHtml(style.id)}">
+        <span class="style-option-icon"><i data-lucide="paint-bucket" class="h-4 w-4" aria-hidden="true"></i></span>
+        <span class="min-w-0 flex-1">
+          <span class="block truncate text-xs font-bold">${escapeHtml(style.name)}</span>
+          <span class="style-option-preview" aria-hidden="true">${styleColorSwatches(style.css)}</span>
+        </span>
+        <i data-lucide="check" class="style-option-check h-4 w-4" aria-hidden="true"></i>
+      </button>`;
+  }).join('');
   list.innerHTML = auto + body;
   refreshIcons(list);
 }
@@ -1708,7 +2187,7 @@ function pickGenerationStyle(styleId) {
   elements.generationStyleButton.focus();
   haptic();
   showToast(style
-    ? `Стиль «${style.style.name}» піде в нові картки`
+    ? `Стиль «${style.name}» піде в нові картки`
     : 'Стиль нових карток підбере Gemini');
   return chosen;
 }
@@ -1815,8 +2294,11 @@ async function confirmDeckModal() {
     haptic('success');
     try {
       // Ланцюг від кореня: колода, яка прийшла раніше за свого батька,
-      // залишилася б у корені назавжди.
-      await pushDeckChain(created.length ? [...created, deck] : [deck]);
+      // залишилася б у корені назавжди. Спершу стиль, потім колоди: інакше
+      // style_id на сервері вказував би на ще не створений рядок.
+      const chain = created.length ? [...created, deck] : [deck];
+      await pushDeckStyles(chain);
+      await pushDeckChain(chain);
       setStorageStatus('Синхронізовано з акаунтом', 'remote');
     } catch (error) {
       showToast(error?.message || 'Колоду збережено локально, сервер недоступний', 'error');
@@ -1837,7 +2319,10 @@ async function confirmDeckModal() {
     }
     targetDeck = resolved.deck;
     createdParents = resolved.created;
-    if (appState.pendingModelCss) setDeckModelCss(targetDeck, appState.pendingModelCss);
+    // Колода щойно створена й прив'язана до спільного «Основного».
+    // CSS із чату не має його переписувати — інакше змінилися б усі
+    // колоди акаунта. Для нової колоди створюємо/вибираємо окремий стиль.
+    if (appState.pendingModelCss) await applyFreshDeckModelCss(targetDeck, appState.pendingModelCss);
     targetDeck.templates = appState.pendingTemplates.slice();
   } else {
     targetDeck = appState.decks.find(deck => deck.id === appState.selectedModalDeckId);
@@ -1880,7 +2365,11 @@ async function confirmDeckModal() {
   showToast(`Збережено ${cards.length} ${pluralizeCards(cards.length)}`);
   haptic('success');
   try {
-    await pushDeckChain(createdParents.length ? [...createdParents, targetDeck] : [targetDeck]);
+    const chain = createdParents.length ? [...createdParents, targetDeck] : [targetDeck];
+    // Стиль міг народитися разом із новою колодою (createDeck або
+    // setDeckModelCss), тож він має доїхати раніше за style_id.
+    await pushDeckStyles(chain);
+    await pushDeckChain(chain);
     setStorageStatus('Синхронізовано з акаунтом', 'remote');
   } catch (error) {
     showToast(error?.message || 'Картки збережено локально, сервер недоступний', 'error');

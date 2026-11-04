@@ -1,9 +1,12 @@
-// Адреса бекенду. За замовчуванням — Render, бо саме цей код їде на
-// GitHub Pages, і браузер відвідувача не має жодного відношення до
-// 127.0.0.1 на нашій машині. Для локального запуску перевизнач у
-// index.html перед підключенням скриптів:
+// Адреса бекенду. Локально index.html і API віддає один процес, тож
+// достатньо same-origin. На GitHub Pages бекенд окремий — Render.
+// Для інших випадків лишається ручний override:
 //   window.ANKI_API_BASE_URL = 'http://127.0.0.1:8000';
-const API_BASE_URL = window.ANKI_API_BASE_URL || 'https://anki-gemini-api.onrender.com';
+const LOCAL_API_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
+const API_BASE_URL = window.ANKI_API_BASE_URL ||
+  (typeof location !== 'undefined' && LOCAL_API_HOSTS.has(location.hostname)
+    ? ''
+    : 'https://anki-gemini-api.onrender.com');
 const STORAGE_KEY = 'anki-gemini-decks-v1';
 const MESSAGES_KEY = 'anki-gemini-messages-v1';
 const THEME_KEY = 'anki-gemini-theme-v1';
@@ -25,10 +28,23 @@ const elements = {
   deckList: document.getElementById('deckList'),
   deckSummary: document.getElementById('deckSummary'),
   emptyDecksState: document.getElementById('emptyDecksState'),
+  stylesNavButton: document.getElementById('stylesNavButton'),
+  deckWindow: document.getElementById('deckWindow'),
   editorPanel: document.getElementById('editorPanel'),
   editorBackButton: document.getElementById('editorBackButton'),
   editorDeckTitle: document.getElementById('editorDeckTitle'),
   editorDeckPath: document.getElementById('editorDeckPath'),
+  deckTabs: document.getElementById('deckTabs'),
+  deckTabCards: document.getElementById('deckTabCards'),
+  deckTabStyle: document.getElementById('deckTabStyle'),
+  deckTabSettings: document.getElementById('deckTabSettings'),
+  deckCardsPane: document.getElementById('deckCardsPane'),
+  deckStylePane: document.getElementById('deckStylePane'),
+  deckSettingsPane: document.getElementById('deckSettingsPane'),
+  deckSettingsCardCount: document.getElementById('deckSettingsCardCount'),
+  deckSettingsStyleName: document.getElementById('deckSettingsStyleName'),
+  deckSettingsPreviewButton: document.getElementById('deckSettingsPreviewButton'),
+  deckSettingsDownloadButton: document.getElementById('deckSettingsDownloadButton'),
   editorCardSelect: document.getElementById('editorCardSelect'),
   previousCardButton: document.getElementById('previousCardButton'),
   nextCardButton: document.getElementById('nextCardButton'),
@@ -39,11 +55,18 @@ const elements = {
   deckStylePanel: document.getElementById('deckStylePanel'),
   deckStyleChevron: document.getElementById('deckStyleChevron'),
   editorStyleName: document.getElementById('editorStyleName'),
+  deckStyleNameInput: document.getElementById('deckStyleNameInput'),
+  deckStyleList: document.getElementById('deckStyleList'),
+  createDeckStyleButton: document.getElementById('createDeckStyleButton'),
   openStylesButton: document.getElementById('openStylesButton'),
   saveDeckStyleButton: document.getElementById('saveDeckStyleButton'),
   styleModal: document.getElementById('styleModal'),
   styleModalDeckName: document.getElementById('styleModalDeckName'),
   styleList: document.getElementById('styleList'),
+  styleEditorWrap: document.getElementById('styleEditorWrap'),
+  styleEditorName: document.getElementById('styleEditorName'),
+  styleEditorCss: document.getElementById('styleEditorCss'),
+  saveStyleEditorButton: document.getElementById('saveStyleEditorButton'),
   closeStyleModalButton: document.getElementById('closeStyleModalButton'),
   cancelStyleModalButton: document.getElementById('cancelStyleModalButton'),
   newStyleName: document.getElementById('newStyleName'),
@@ -103,7 +126,27 @@ const elements = {
   toastText: document.getElementById('toastText'),
   toastIcon: document.getElementById('toastIcon'),
   storageStatusText: document.getElementById('storageStatusText'),
-  storageStatusDot: document.getElementById('storageStatusDot')
+  storageStatusDot: document.getElementById('storageStatusDot'),
+  processDrawer: document.getElementById('processDrawer'),
+  processDrawerBackdrop: document.getElementById('processDrawerBackdrop'),
+  openProcessDrawerButton: document.getElementById('openProcessDrawerButton'),
+  closeProcessDrawerButton: document.getElementById('closeProcessDrawerButton'),
+  sidebarProcessButton: document.getElementById('sidebarProcessButton'),
+  processDrawerStateBadge: document.getElementById('processDrawerStateBadge'),
+  processActiveModelBadge: document.getElementById('processActiveModelBadge'),
+  processCurrentStatusText: document.getElementById('processCurrentStatusText'),
+  processCurrentDetailsText: document.getElementById('processCurrentDetailsText'),
+  processModelChainList: document.getElementById('processModelChainList'),
+  processEventLog: document.getElementById('processEventLog'),
+  clearProcessLogButton: document.getElementById('clearProcessLogButton'),
+  processLastLatency: document.getElementById('processLastLatency'),
+  processHeaderPing: document.getElementById('processHeaderPing'),
+  processHeaderDot: document.getElementById('processHeaderDot'),
+  sidebarProcessBadge: document.getElementById('sidebarProcessBadge'),
+  stepRequest: document.getElementById('stepRequest'),
+  stepModelSearch: document.getElementById('stepModelSearch'),
+  stepGeneration: document.getElementById('stepGeneration'),
+  stepDone: document.getElementById('stepDone')
 };
 
 const appState = {
@@ -118,11 +161,13 @@ const appState = {
   pendingFieldNames: [],
   pendingModelCss: '',
   pendingTemplates: [],
-  // Колода та стиль, які зараз редагуються у вікні стилів. Окремо від
-  // editorDeckId, бо вікно стилів можна закрити, а редактор лишається
-  // відкритим — і навпаки.
+  // Колода та стиль, які зараз редагуються. deckStyleId не потрібен:
+  // бібліотека спільна для акаунта, тож «колода, з якої відкрили стилі»
+  // зберігається в styleDeckId лише для підпису й застосування.
   styleDeckId: null,
-  renamingStyleId: null,
+  // Спільна бібліотека стилів акаунта і вибраний для редагування рядок.
+  styleLibrary: loadStylesLocally(),
+  selectedStyleId: null,
   // Стиль, який згоден взяти Gemini для нової генерації ('' = авто).
   generationStyleId: loadGenerationStyleId(),
   selectedModalDeckId: null,
@@ -383,10 +428,270 @@ async function sendToBackend(type, payload = {}) {
   }
 }
 
+// --- МОНІТОР ПРОЦЕСІВ ТА СТАНУ МОДЕЛЕЙ ШІ ---
+const processState = {
+  isOpen: false,
+  status: 'idle',
+  activeModel: 'gemini-3.5-flash-lite',
+  stepDescription: 'Система готова до роботи',
+  lastModel: 'gemini-3.5-flash-lite',
+  lastLatencyMs: 1490,
+  step: 0,
+  modelChain: [
+    { name: 'gemini-3.5-flash-lite', tag: 'Швидка' },
+    { name: 'gemini-flash-lite-latest', tag: 'Резерв 1' },
+    { name: 'gemini-3.6-flash', tag: 'Резерв 2' },
+    { name: 'gemini-3.5-flash', tag: 'Розумна' },
+    { name: 'gemini-3.1-flash-lite', tag: 'Фулбек' }
+  ],
+  events: [
+    {
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      text: 'Монітор процесів активовано. Черга моделей готова.',
+      level: 'info'
+    }
+  ],
+  pollTimer: null
+};
+
+function openProcessDrawer() {
+  processState.isOpen = true;
+  if (elements.processDrawer) {
+    elements.processDrawer.classList.remove('-translate-x-full');
+    elements.processDrawer.classList.add('translate-x-0');
+  }
+  if (elements.processDrawerBackdrop) {
+    elements.processDrawerBackdrop.classList.remove('hidden');
+  }
+  if (appState.drawerOpen && typeof closeDrawer === 'function') {
+    closeDrawer();
+  }
+  renderProcessDrawer();
+  fetchProcessStatus();
+  startProcessPolling();
+}
+
+function closeProcessDrawer() {
+  processState.isOpen = false;
+  if (elements.processDrawer) {
+    elements.processDrawer.classList.add('-translate-x-full');
+    elements.processDrawer.classList.remove('translate-x-0');
+  }
+  if (elements.processDrawerBackdrop) {
+    elements.processDrawerBackdrop.classList.add('hidden');
+  }
+  stopProcessPolling();
+}
+
+function toggleProcessDrawer() {
+  if (processState.isOpen) closeProcessDrawer();
+  else openProcessDrawer();
+}
+
+function updateStepUI(stepId, isComplete, isActive) {
+  const el = elements[stepId];
+  if (!el) return;
+  const dot = el.querySelector('.step-dot');
+  if (isActive) {
+    el.className = 'flex items-center gap-2.5 text-xs text-violet-400 font-bold';
+    if (dot) {
+      dot.className = 'step-dot flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-violet-500/20 text-violet-400 text-[10px] font-extrabold ring-2 ring-violet-500/50 animate-pulse';
+    }
+  } else if (isComplete) {
+    el.className = 'flex items-center gap-2.5 text-xs text-emerald-400 font-medium';
+    if (dot) {
+      dot.className = 'step-dot flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-400 text-[10px] font-bold';
+      dot.textContent = '✓';
+    }
+  } else {
+    el.className = 'flex items-center gap-2.5 text-xs text-app-hint';
+    if (dot) {
+      dot.className = 'step-dot flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-app-hint/15 text-app-hint text-[10px] font-bold';
+      const num = stepId === 'stepRequest' ? '1' : stepId === 'stepModelSearch' ? '2' : stepId === 'stepGeneration' ? '3' : '4';
+      dot.textContent = num;
+    }
+  }
+}
+
+function renderProcessDrawer() {
+  if (!elements.processDrawer) return;
+
+  const isBusy = processState.status === 'searching' || processState.status === 'generating';
+  const isErr = processState.status === 'error';
+
+  let badgeText = 'Вільний';
+  let badgeClasses = 'bg-emerald-500/15 text-emerald-500';
+  let dotColor = 'bg-emerald-500';
+
+  if (isBusy) {
+    badgeText = processState.status === 'searching' ? 'Пошук моделі...' : 'Генерація...';
+    badgeClasses = 'bg-violet-500/15 text-violet-400';
+    dotColor = 'bg-violet-400';
+  } else if (isErr) {
+    badgeText = 'Помилка';
+    badgeClasses = 'bg-red-500/15 text-red-500';
+    dotColor = 'bg-red-500';
+  }
+
+  if (elements.processDrawerStateBadge) {
+    elements.processDrawerStateBadge.textContent = badgeText;
+    elements.processDrawerStateBadge.className = `rounded-full px-2 py-0.5 text-[10px] font-extrabold ${badgeClasses}`;
+  }
+  if (elements.sidebarProcessBadge) {
+    elements.sidebarProcessBadge.textContent = isBusy ? 'Активний' : 'Готовий';
+    elements.sidebarProcessBadge.className = `rounded-full px-2 py-0.5 text-[10px] font-extrabold ${badgeClasses}`;
+  }
+  if (elements.processHeaderDot) {
+    elements.processHeaderDot.className = `relative inline-flex h-2.5 w-2.5 rounded-full ${dotColor}`;
+  }
+  if (elements.processHeaderPing) {
+    if (isBusy) elements.processHeaderPing.classList.remove('hidden');
+    else elements.processHeaderPing.classList.add('hidden');
+  }
+
+  if (elements.processActiveModelBadge) {
+    elements.processActiveModelBadge.textContent = processState.activeModel || processState.lastModel || 'gemini-3.5-flash-lite';
+  }
+  if (elements.processCurrentStatusText) {
+    elements.processCurrentStatusText.textContent = processState.stepDescription || 'Очікування запиту';
+  }
+  if (elements.processCurrentDetailsText) {
+    if (isBusy) {
+      elements.processCurrentDetailsText.textContent = 'Здійснюється опитування моделей. При виникненні 503 чи затримок система автоматично перемикається на наступну в ланцюжку.';
+    } else if (isErr) {
+      elements.processCurrentDetailsText.textContent = 'Останній запит завершився з помилкою. Перевірте мережу або квоту.';
+    } else {
+      elements.processCurrentDetailsText.textContent = 'Система готова. При відправці запиту тут відобразиться пошук доступної моделі в реальному часі.';
+    }
+  }
+
+  updateStepUI('stepRequest', processState.step >= 1, processState.step === 1);
+  updateStepUI('stepModelSearch', processState.step >= 2, processState.step === 2);
+  updateStepUI('stepGeneration', processState.step >= 3, processState.step === 3);
+  updateStepUI('stepDone', processState.step >= 4, false);
+
+  if (elements.processModelChainList) {
+    elements.processModelChainList.innerHTML = processState.modelChain.map(m => {
+      const isCurrent = (processState.activeModel === m.name && isBusy) || (processState.lastModel === m.name && !isBusy);
+      const bg = isCurrent ? 'border-violet-500/40 bg-violet-500/10' : 'border-app-hint/10 bg-app-surface';
+      const indicator = isCurrent
+        ? '<span class="inline-flex h-2 w-2 rounded-full bg-violet-400 animate-pulse"></span>'
+        : '<span class="inline-flex h-1.5 w-1.5 rounded-full bg-app-hint/30"></span>';
+      return `
+        <div class="flex items-center justify-between p-2 rounded-xl border ${bg} transition">
+          <div class="flex items-center gap-2 min-w-0">
+            ${indicator}
+            <span class="font-mono text-[11px] font-bold truncate text-app-text">${m.name}</span>
+          </div>
+          <span class="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded ${isCurrent ? 'bg-violet-500/20 text-violet-300' : 'text-app-hint bg-app-hint/10'}">${m.tag}</span>
+        </div>
+      `;
+    }).join('');
+  }
+
+  if (elements.processEventLog) {
+    elements.processEventLog.innerHTML = processState.events.map(ev => {
+      let colorClass = 'text-app-hint';
+      let icon = '•';
+      if (ev.level === 'success') { colorClass = 'text-emerald-400 font-semibold'; icon = '✓'; }
+      else if (ev.level === 'warning') { colorClass = 'text-amber-400'; icon = '▲'; }
+      else if (ev.level === 'error') { colorClass = 'text-red-400 font-semibold'; icon = '✕'; }
+      else if (ev.level === 'searching') { colorClass = 'text-violet-400'; icon = '🔍'; }
+      return `<div class="flex items-start gap-1.5 leading-snug"><span class="text-app-hint opacity-70 shrink-0">[${ev.time}]</span><span class="${colorClass}">${icon} ${escapeHtml(ev.text)}</span></div>`;
+    }).join('');
+  }
+
+  if (elements.processLastLatency) {
+    const lat = processState.lastLatencyMs ? (processState.lastLatencyMs / 1000).toFixed(2) + ' с' : '—';
+    elements.processLastLatency.textContent = lat;
+  }
+
+  if (typeof lucide !== 'undefined' && lucide.createIcons) {
+    lucide.createIcons();
+  }
+}
+
+function addProcessEvent(text, level = 'info', model = null) {
+  const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  processState.events.unshift({ time, text, level, model });
+  if (processState.events.length > 50) processState.events.pop();
+  if (processState.isOpen) renderProcessDrawer();
+}
+
+function setProcessState(status, stepDesc, details) {
+  processState.status = status;
+  if (stepDesc) processState.stepDescription = stepDesc;
+  renderProcessDrawer();
+}
+
+function setProcessStep(num) {
+  processState.step = num;
+  renderProcessDrawer();
+}
+
+function clearProcessLog() {
+  processState.events = [];
+  renderProcessDrawer();
+}
+
+async function fetchProcessStatus() {
+  try {
+    const res = await fetch(getApiUrl('/api/system/process-status'));
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!data) return;
+    if (data.status && data.status !== 'idle') {
+      processState.status = data.status;
+    }
+    if (data.active_model) processState.activeModel = data.active_model;
+    if (data.step_description) processState.stepDescription = data.step_description;
+    if (data.last_model) processState.lastModel = data.last_model;
+    if (data.last_latency_ms) processState.lastLatencyMs = data.last_latency_ms;
+    if (Array.isArray(data.events) && data.events.length) {
+      for (const ev of data.events.slice().reverse()) {
+        const exists = processState.events.some(e => e.time === ev.time && e.text === ev.text);
+        if (!exists) {
+          processState.events.unshift(ev);
+        }
+      }
+      if (processState.events.length > 50) processState.events.length = 50;
+    }
+    renderProcessDrawer();
+  } catch (_) {}
+}
+
+function startProcessPolling() {
+  stopProcessPolling();
+  processState.pollTimer = setInterval(fetchProcessStatus, 800);
+}
+
+function stopProcessPolling() {
+  if (processState.pollTimer) {
+    clearInterval(processState.pollTimer);
+    processState.pollTimer = null;
+  }
+}
+
+window.ProcessMonitor = {
+  open: openProcessDrawer,
+  close: closeProcessDrawer,
+  toggle: toggleProcessDrawer,
+  addEvent: addProcessEvent,
+  setState: setProcessState,
+  setStep: setProcessStep,
+  fetchStatus: fetchProcessStatus,
+  render: renderProcessDrawer
+};
+
 elements.openSidebarButton.addEventListener('click', openDrawer);
 elements.themeToggleButton.addEventListener('click', toggleTheme);
 elements.closeSidebarButton.addEventListener('click', closeDrawer);
 elements.drawerBackdrop.addEventListener('click', closeDrawer);
+if (elements.openProcessDrawerButton) elements.openProcessDrawerButton.addEventListener('click', openProcessDrawer);
+if (elements.closeProcessDrawerButton) elements.closeProcessDrawerButton.addEventListener('click', closeProcessDrawer);
+if (elements.processDrawerBackdrop) elements.processDrawerBackdrop.addEventListener('click', closeProcessDrawer);
+if (elements.sidebarProcessButton) elements.sidebarProcessButton.addEventListener('click', openProcessDrawer);
+if (elements.clearProcessLogButton) elements.clearProcessLogButton.addEventListener('click', clearProcessLog);
 elements.chatSwitcherButton.addEventListener('click', () => toggleChatPanel());
 elements.newChatButton.addEventListener('click', () => {
   createChat();
@@ -475,11 +780,6 @@ elements.deckList.addEventListener('change', event => {
   moveDeckToParent(select.dataset.deckId, select.value || null);
 });
 
-elements.editorBackButton.addEventListener('click', () => {
-  showDeckList();
-  if (!desktopQuery.matches) openDrawer();
-});
-
 elements.closePreviewButton.addEventListener('click', closeDeckPreview);
 elements.previewFlipButton.addEventListener('click', flipPreviewCard);
 elements.previewPrevButton.addEventListener('click', () => navigatePreviewCard(-1));
@@ -551,12 +851,41 @@ elements.generationStyleButton.addEventListener('keydown', event => {
   openGenerationStyleList();
 });
 
-// Вікно стилів. Кліки делегуємо на список: рядки стилів перемальовуються
-// після кожної дії, і слухач на кожному рядку довелося б переписувати.
+// Вікно колоди: вкладки, стилі, закриття. Кліки делегуємо на списки:
+// рядки перемальовуються після кожної дії, і слухач на кожному рядку
+// довелося б переписувати.
+elements.editorBackButton.addEventListener('click', () => showDeckList());
+elements.deckTabs.addEventListener('click', event => {
+  const tab = event.target.closest('[data-deck-tab]');
+  if (!tab) return;
+  selectDeckTab(tab.dataset.deckTab);
+  haptic('light');
+});
+elements.deckWindow.addEventListener('click', event => {
+  if (event.target === elements.deckWindow) showDeckList();
+});
+elements.deckSettingsPreviewButton.addEventListener('click', () => {
+  const deck = appState.decks.find(item => item.id === appState.editorDeckId);
+  if (deck) openDeckPreview(deck.id);
+});
+elements.deckSettingsDownloadButton.addEventListener('click', () => {
+  const deck = appState.decks.find(item => item.id === appState.editorDeckId);
+  if (deck) downloadDeck(deck.id);
+});
+
+// Бібліотека стилів. openStylesButton викликає функцію напряму, тому
+// openStyleModal сама відрізняє подію від id колоди.
 elements.openStylesButton.addEventListener('click', openStyleModal);
+elements.stylesNavButton.addEventListener('click', () => {
+  showDeckList();
+  openStyleModal('');
+  if (!desktopQuery.matches) closeDrawer();
+});
 elements.closeStyleModalButton.addEventListener('click', closeStyleModal);
 elements.cancelStyleModalButton.addEventListener('click', closeStyleModal);
 elements.createStyleButton.addEventListener('click', createDeckStyle);
+elements.createDeckStyleButton.addEventListener('click', createDeckStyle);
+elements.saveStyleEditorButton.addEventListener('click', saveStyleEditor);
 elements.newStyleName.addEventListener('keydown', (event) => {
   if (event.key === 'Enter') createDeckStyle();
 });
@@ -564,16 +893,17 @@ elements.styleList.addEventListener('click', (event) => {
   const button = event.target.closest('[data-action]');
   if (!button) return;
   const styleId = button.dataset.styleId;
-  if (button.dataset.action === 'apply-style') applyDeckStyle(styleId);
-  else if (button.dataset.action === 'rename-style') startStyleRename(styleId);
-  else if (button.dataset.action === 'cancel-rename-style') {
-    appState.renamingStyleId = null;
-    renderStyleList();
-  } else if (button.dataset.action === 'save-style-name') {
-    commitStyleRename(styleId, styleNameInputValue(styleId));
-  } else if (button.dataset.action === 'delete-style') {
-    requestDeleteDeckStyle(styleId);
-  }
+  if (button.dataset.action === 'edit-style') selectStyleForEditing(styleId);
+  else if (button.dataset.action === 'apply-style') applyDeckStyle(styleId);
+  else if (button.dataset.action === 'generation-style') setGenerationStyleId(styleId);
+  else if (button.dataset.action === 'delete-style') requestDeleteDeckStyle(styleId);
+});
+elements.deckStyleList.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-action]');
+  if (!button) return;
+  const styleId = button.dataset.styleId;
+  if (button.dataset.action === 'apply-deck-style') applyDeckStyleToEditor(styleId);
+  else if (button.dataset.action === 'generation-deck-style') setGenerationStyleId(styleId);
 });
 
 document.getElementById('addDeckButton').addEventListener('click', () => {
@@ -678,8 +1008,10 @@ elements.confirmModal.addEventListener('click', event => {
 
 document.addEventListener('keydown', event => {
   if (event.key !== 'Escape') return;
-  if (elements.confirmModal.classList.contains('flex')) closeConfirmModal();
+  if (elements.styleModal.classList.contains('flex')) closeStyleModal();
+  else if (elements.confirmModal.classList.contains('flex')) closeConfirmModal();
   else if (elements.deckModal.classList.contains('flex')) closeDeckModal();
+  else if (elements.deckWindow && !elements.deckWindow.classList.contains('hidden')) showDeckList();
   else if (isChatPanelOpen()) toggleChatPanel(false);
   else if (appState.drawerOpen) closeDrawer();
 });

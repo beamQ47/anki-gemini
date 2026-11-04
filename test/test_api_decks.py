@@ -149,7 +149,10 @@ with TestClient(main.app) as client:
                             ("GET", f"/api/decks/{DECK}"), ("PUT", f"/api/decks/{DECK}"),
                             ("DELETE", f"/api/decks/{DECK}"), ("PUT", f"/api/decks/{DECK}/cards"),
                             ("PUT", f"/api/notes/{uuid_mod.uuid4()}"),
-                            ("DELETE", f"/api/notes/{uuid_mod.uuid4()}")):
+                            ("DELETE", f"/api/notes/{uuid_mod.uuid4()}"),
+                            ("GET", "/api/styles"), ("POST", "/api/styles"),
+                            ("PUT", f"/api/styles/{uuid_mod.uuid4()}"),
+                            ("DELETE", f"/api/styles/{uuid_mod.uuid4()}")):
             r = client.request(method, url, json={})
             check(f"{method} {url.split('?')[0][:38]}", r.status_code, 401)
 
@@ -251,6 +254,43 @@ with TestClient(main.app) as client:
         check("201", r.status_code, 201)
         check("у Аліси своя", [d["id"] for d in client.get("/api/decks", headers=ALICE_H).json()["decks"]], [DECK])
         check("у Боба своя", [d["id"] for d in client.get("/api/decks", headers=BOB_H).json()["decks"]], [OTHER_DECK])
+
+        print("\nБібліотека стилів: CRUD і прив'язка колоди")
+        STYLE = str(uuid_mod.uuid4())
+        check("без токена 401", client.get("/api/styles").status_code, 401)
+        r = client.post("/api/styles", headers=ALICE_H, json={
+            "id": STYLE, "name": "Світлий", "css": ".card{color:#111}"})
+        check("201", r.status_code, 201)
+        check("id", r.json()["id"], STYLE)
+        check("name", r.json()["name"], "Світлий")
+        check("css", r.json()["css"], ".card{color:#111}")
+        r = client.get("/api/styles", headers=ALICE_H)
+        check("200", r.status_code, 200)
+        check("один стиль", [s["id"] for s in r.json()["styles"]], [STYLE])
+        check("Bob не бачить стиль", client.get("/api/styles", headers=BOB_H).json()["styles"], [])
+        r = client.put(f"/api/styles/{STYLE}", headers=ALICE_H, json={
+            "id": STYLE, "name": "Світлий 2", "css": ".card{color:#222}"})
+        check("PUT 200", r.status_code, 200)
+        check("оновлено", (r.json()["name"], r.json()["css"]), ("Світлий 2", ".card{color:#222}"))
+        check("PUT чужого -> 404", client.put(f"/api/styles/{STYLE}", headers=BOB_H, json={
+            "id": STYLE, "name": "x", "css": "y"}).status_code, 404)
+        check("DELETE чужого -> 404",
+              client.delete(f"/api/styles/{STYLE}", headers=BOB_H).status_code, 404)
+
+        r = client.put(f"/api/decks/{DECK}", headers=ALICE_H, json={
+            "id": DECK, "title": "Колода Аліси", "field_names": FIELDS,
+            "css": ".card{color:#222}", "style_id": STYLE})
+        check("колоду прив'язано", r.json()["styleId"], STYLE)
+        check("styleId у GET", client.get(f"/api/decks/{DECK}", headers=ALICE_H).json()["styleId"], STYLE)
+        client.put(f"/api/styles/{STYLE}", headers=ALICE_H, json={
+            "id": STYLE, "name": "Світлий 2", "css": ".card{color:#333}"})
+        check("css колоди оновився разом зі стилем",
+              client.get(f"/api/decks/{DECK}", headers=ALICE_H).json()["css"], ".card{color:#333}")
+        check("DELETE 200", client.delete(f"/api/styles/{STYLE}", headers=ALICE_H).status_code, 200)
+        deck_after = client.get(f"/api/decks/{DECK}", headers=ALICE_H).json()
+        check("колода лишилась", deck_after["id"], DECK)
+        check("зв'язок знято", deck_after["styleId"], None)
+        check("css-знімок лишився", deck_after["css"], ".card{color:#333}")
 
         print("\nКриваві id")
         for bad in ("не-uuid", "123", "abc-def"):

@@ -77,7 +77,20 @@ const ICON_CONTENT = {
   menu: '<line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="18" y2="18"/>',
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>',
   moon: '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>',
-  circle: '<circle cx="12" cy="12" r="9"/>'
+  circle: '<circle cx="12" cy="12" r="9"/>',
+  activity: '<path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/>',
+  'chevron-down': '<path d="m6 9 6 6 6-6"/>',
+  cpu: '<rect width="16" height="16" x="4" y="4" rx="2"/><rect width="6" height="6" x="9" y="9" rx="1"/><path d="M15 2v2"/><path d="M15 20v2"/><path d="M2 15h2"/><path d="M2 9h2"/><path d="M20 15h2"/><path d="M20 9h2"/><path d="M9 2v2"/><path d="M9 20v2"/>',
+  eraser: '<path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m5 11 9 9"/>',
+  eye: '<path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>',
+  'folder-plus': '<path d="M12 10v6"/><path d="M9 13h6"/><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 8 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
+  layers: '<path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 17.5-9.17 4.17a2 2 0 0 1-1.66 0L2 17.5"/><path d="m22 12.5-9.17 4.17a2 2 0 0 1-1.66 0L2 12.5"/>',
+  'message-circle-plus': '<path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/><path d="M8 12h8"/><path d="M12 8v8"/>',
+  'messages-square': '<path d="M14 9a2 2 0 0 1-2 2H6l-4 4V4c0-1.1.9-2 2-2h8a2 2 0 0 1 2 2z"/><path d="M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1"/>',
+  'paint-bucket': '<path d="m19 11-8-8-8.6 8.6a2 2 0 0 0 0 2.8l5.2 5.2c.8.8 2 .8 2.8 0L19 11Z"/><path d="m5 2 5 5"/><path d="M2 13h15"/><path d="M22 20a2 2 0 1 1-4 0c0-1.6 1.7-2.4 2-4 .3 1.6 2 2.4 2 4Z"/>',
+  palette: '<circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.563-2.512 5.563-5.563C22 6.5 17.5 2 12 2Z"/>',
+  'settings-2': '<path d="M20 7h-9"/><path d="M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/>',
+  'wand-2': '<path d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72Z"/><path d="m14 7 3 3"/><path d="M5 6v4"/><path d="M19 14v4"/><path d="M10 2v2"/><path d="M7 8H3"/><path d="M21 16h-4"/><path d="M11 3H9"/>'
 };
 
 function refreshIcons(root = document) {
@@ -273,8 +286,8 @@ function renderMessage(message) {
 
   if (message.role === 'user') {
     return `
-      <div class="message-enter mb-5 flex justify-end pl-8 sm:pl-20" data-message-id="${escapeHtml(message.id)}">
-        <div class="max-w-3xl rounded-3xl rounded-br-md px-4 py-3 text-app-button-text shadow-sm" style="background: var(--app-button);">
+      <div class="message-enter mb-5 flex justify-end pl-8 sm:pl-20" data-message-id="${escapeHtml(message.id)}" data-role="user">
+        <div class="user-message-bubble max-w-3xl rounded-3xl rounded-br-md px-4 py-3 text-app-button-text shadow-sm" style="background: var(--app-user-msg);">
           ${message.attachment ? `<div class="mb-2 flex items-center gap-2 rounded-xl bg-black/10 px-2.5 py-2 text-xs font-semibold"><i data-lucide="paperclip" class="h-3.5 w-3.5" aria-hidden="true"></i><span class="truncate">${escapeHtml(message.attachment.name)}</span></div>` : ''}
           <div class="whitespace-pre-wrap text-sm leading-6">${escapeHtml(message.content)}</div>
           <time class="mt-1.5 block text-right text-[10px] opacity-70">${formatRelativeDate(message.createdAt)}</time>
@@ -375,8 +388,8 @@ async function getAssistantReply(text, file) {
   // сервер не знав би, який саме CSS має вжити. Порожнє поле = «авто».
   const chosen = generationStyle();
   if (chosen) {
-    form.append('style_name', chosen.style.name);
-    form.append('style_css', chosen.style.css);
+    form.append('style_name', chosen.name);
+    form.append('style_css', chosen.css);
   }
   if (file) form.append('document', file);
   const response = await apiFetch('/api/chat', { method: 'POST', body: form });
@@ -394,7 +407,7 @@ async function getAssistantReply(text, file) {
     // Сервер уже повертає обраний стиль, навіть якщо Gemini його переписав.
     // Підстраховка тут: старий сервер або помилка не повинні знову підсунути
     // в колоду стиль, який користувач обрав, але не просив.
-    modelCss: chosen ? chosen.style.css : (typeof model.css === 'string' ? model.css : ''),
+    modelCss: chosen ? chosen.css : (typeof model.css === 'string' ? model.css : ''),
     templates: Array.isArray(model.templates) ? model.templates : []
   };
 }
@@ -480,8 +493,19 @@ async function submitChat() {
   // Запит користувача зберігається одразу, ще до відповіді: якщо
   // перезавантаження станеться під час очікування, текст не зникне.
   persistChat();
+  window.ProcessMonitor?.setStep(1);
+  window.ProcessMonitor?.addEvent('Запит надіслано: "' + (text ? text.slice(0, 35) + '...' : 'документ') + '"', 'info');
+  window.ProcessMonitor?.setStep(2);
+  window.ProcessMonitor?.setState('searching', 'Пошук вільної моделі Gemini...', 'Опитування fallback-ланцюжка...');
+  const processPollTimer = setInterval(() => window.ProcessMonitor?.fetchStatus(), 600);
   try {
     const response = await getAssistantReply(text || 'Проаналізуй прикріплений документ', file);
+    clearInterval(processPollTimer);
+    window.ProcessMonitor?.setStep(3);
+    window.ProcessMonitor?.addEvent('Отримано відповідь від Gemini, валідація карток...', 'success');
+    window.ProcessMonitor?.setStep(4);
+    window.ProcessMonitor?.setState('completed', 'Готово', 'Генерація та валідація успішна');
+    window.ProcessMonitor?.fetchStatus();
     placeAssistantMessage(targetChatId, targetMessages, loadingMessage.id, {
       id: createId(),
       role: 'assistant',
@@ -497,6 +521,10 @@ async function submitChat() {
     persistChat();
     haptic('success');
   } catch (error) {
+    clearInterval(processPollTimer);
+    window.ProcessMonitor?.setState('error', 'Помилка виконання', error && error.message ? error.message : 'Помилка');
+    window.ProcessMonitor?.addEvent('Помилка: ' + (error && error.message ? error.message : 'Помилка запиту'), 'error');
+    window.ProcessMonitor?.fetchStatus();
     // Сервер уже пояснив, що саме не так (400 на тип файлу, 413 на розмір,
     // 503 на перевантаження). Показувати «перевірте, чи бекенд запущено» —
     // це брехня: бекенд відповів, і саме він сказав причину.

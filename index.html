@@ -55,7 +55,7 @@
     };
   </script>
   <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
-  <link rel="stylesheet" href="css/style.css?v=20260928l">
+  <link rel="stylesheet" href="css/style.css?v=20261103a">
   <script>
     (function () {
       try {
@@ -89,164 +89,161 @@
 
   <div id="app" class="flex h-full w-full overflow-hidden bg-app-bg text-app-text" hidden>
     <div id="drawerBackdrop" class="fixed inset-0 z-40 hidden bg-slate-950/45 backdrop-blur-[2px] md:hidden" aria-hidden="true"></div>
+    <div id="processDrawerBackdrop" class="fixed inset-0 z-50 hidden bg-slate-950/50 backdrop-blur-[2px]" aria-hidden="true"></div>
 
-    <aside id="sidebar" class="fixed inset-y-0 left-0 z-50 flex w-[min(90vw,360px)] -translate-x-full flex-col border-r surface bg-app-surface shadow-soft transition-transform duration-300 ease-out md:relative md:z-20 md:w-[340px] md:translate-x-0 desktop-shadow" aria-label="Редактор колод">
-      <div class="safe-top safe-left safe-right border-b border-app-hint/10 px-4 pb-4">
-        <div class="flex items-center gap-3">
-          <div class="ai-gradient flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-white shadow-lg shadow-violet-500/20">
-            <i data-lucide="layers-3" class="h-5 w-5" aria-hidden="true"></i>
+    <aside id="processDrawer" class="fixed inset-y-0 left-0 z-50 flex w-[min(92vw,380px)] -translate-x-full flex-col border-r surface bg-app-surface shadow-2xl transition-transform duration-300 ease-out" aria-label="Монітор процесів">
+      <div class="safe-top safe-left safe-right flex items-center justify-between border-b border-app-hint/10 p-3.5 sm:px-4">
+        <div class="flex items-center gap-2.5">
+          <div class="ai-gradient flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-white shadow-sm">
+            <i data-lucide="cpu" class="h-4 w-4" aria-hidden="true"></i>
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <h2 class="text-xs font-extrabold uppercase tracking-wider text-app-text">Монітор процесів</h2>
+              <span id="processDrawerStateBadge" class="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-extrabold text-emerald-500">Вільний</span>
+            </div>
+            <p id="processDrawerSubtitle" class="text-[10px] text-app-hint">Пошук та статус моделей ШІ</p>
+          </div>
+        </div>
+        <button id="closeProcessDrawerButton" class="icon-button" type="button" aria-label="Закрити монітор процесів">
+          <i data-lucide="x" class="h-5 w-5" aria-hidden="true"></i>
+        </button>
+      </div>
+
+      <div class="safe-left safe-right min-h-0 flex-1 space-y-3.5 overflow-y-auto p-3.5 scroll-area sm:p-4">
+        <!-- Поточний стан -->
+        <div class="rounded-2xl border muted-surface border-app-hint/15 p-3.5">
+          <div class="flex items-center justify-between gap-2 mb-2">
+            <span class="text-[11px] font-extrabold uppercase tracking-wide text-app-hint">Поточний стан</span>
+            <span id="processActiveModelBadge" class="rounded-lg bg-violet-500/15 px-2 py-0.5 text-[10px] font-bold text-violet-400">gemini-3.5-flash-lite</span>
+          </div>
+          <p id="processCurrentStatusText" class="text-xs font-semibold text-app-text">Очікування запиту</p>
+          <p id="processCurrentDetailsText" class="mt-1 text-[11px] text-app-hint">Система готова. При відправці запиту тут відобразиться пошук доступної моделі в реальному часі.</p>
+          
+          <!-- Етапи обробки -->
+          <div class="mt-3.5 space-y-2 border-t border-app-hint/10 pt-3">
+            <div id="stepRequest" class="flex items-center gap-2.5 text-xs text-app-hint">
+              <span class="step-dot flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-app-hint/15 text-[10px] font-bold">1</span>
+              <span class="step-label">Підготовка запиту та контексту</span>
+            </div>
+            <div id="stepModelSearch" class="flex items-center gap-2.5 text-xs text-app-hint">
+              <span class="step-dot flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-app-hint/15 text-[10px] font-bold">2</span>
+              <span class="step-label">Пошук вільної моделі в ланцюжку</span>
+            </div>
+            <div id="stepGeneration" class="flex items-center gap-2.5 text-xs text-app-hint">
+              <span class="step-dot flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-app-hint/15 text-[10px] font-bold">3</span>
+              <span class="step-label">Генерація контенту та карток</span>
+            </div>
+            <div id="stepDone" class="flex items-center gap-2.5 text-xs text-app-hint">
+              <span class="step-dot flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-app-hint/15 text-[10px] font-bold">4</span>
+              <span class="step-label">Валідація LaTeX і рендеринг</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Ланцюжок моделей -->
+        <div class="rounded-2xl border muted-surface border-app-hint/15 p-3.5">
+          <div class="flex items-center justify-between gap-2 mb-2">
+            <span class="text-[11px] font-extrabold uppercase tracking-wide text-app-hint">Ланцюжок fallback-моделей</span>
+            <span class="text-[10px] text-app-hint">черга 1 → 5</span>
+          </div>
+          <div id="processModelChainList" class="space-y-1.5 text-xs"></div>
+        </div>
+
+        <!-- Журнал подій -->
+        <div class="rounded-2xl border muted-surface border-app-hint/15 p-3.5">
+          <div class="flex items-center justify-between gap-2 mb-2">
+            <span class="text-[11px] font-extrabold uppercase tracking-wide text-app-hint">Журнал подій процесу</span>
+            <button id="clearProcessLogButton" class="text-[10px] font-bold text-app-hint hover:text-app-text transition" type="button">Очистити</button>
+          </div>
+          <div id="processEventLog" class="max-h-52 space-y-2 overflow-y-auto text-[11px] font-mono scroll-area pr-1"></div>
+        </div>
+      </div>
+
+      <!-- Підвал -->
+      <div class="safe-left safe-right border-t border-app-hint/10 p-3 bg-app-surface/90 text-[10px] text-app-hint">
+        <div class="flex items-center justify-between">
+          <span>Остання затримка: <strong id="processLastLatency" class="text-app-text">1.49 с</strong></span>
+          <span>База: <strong class="text-emerald-500">Supabase OK</strong></span>
+        </div>
+      </div>
+    </aside>
+
+    <aside id="sidebar" class="fixed inset-y-0 left-0 z-50 flex w-[min(86vw,300px)] -translate-x-full flex-col border-r surface bg-app-surface shadow-soft transition-transform duration-300 ease-out md:relative md:z-20 md:w-[272px] md:translate-x-0 desktop-shadow" aria-label="Колоди">
+      <div class="safe-top safe-left safe-right border-b border-app-hint/10 px-3 pb-3">
+        <div class="flex items-center gap-2.5">
+          <div class="ai-gradient flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-white shadow-lg shadow-violet-500/20">
+            <i data-lucide="layers-3" class="h-4 w-4" aria-hidden="true"></i>
           </div>
           <div class="min-w-0 flex-1">
-            <p class="truncate text-[15px] font-extrabold tracking-tight">Anki Gemini Workspace</p>
-            <p class="text-xs font-medium text-app-hint">Deck workspace</p>
+            <p class="truncate text-sm font-extrabold tracking-tight">Anki Gemini</p>
+            <p class="text-[11px] font-medium text-app-hint">Deck workspace</p>
           </div>
           <button id="closeSidebarButton" class="icon-button md:hidden" type="button" aria-label="Закрити меню">
             <i data-lucide="x" class="h-5 w-5" aria-hidden="true"></i>
           </button>
         </div>
 
-        <div class="mt-4 flex items-center gap-3 rounded-2xl muted-surface border p-3">
+        <div class="mt-3 flex items-center gap-2.5 rounded-xl muted-surface border p-2.5">
           <div class="relative shrink-0">
-            <div id="sidebarAvatar" class="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full ai-gradient text-sm font-bold text-white">вЂ”</div>
-            <span class="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-app-surface bg-emerald-500"></span>
+            <div id="sidebarAvatar" class="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full ai-gradient text-xs font-bold text-white">—</div>
+            <span class="absolute bottom-0 right-0 h-2 w-2 rounded-full border-2 border-app-surface bg-emerald-500"></span>
           </div>
-          <div class="min-w-0">
-            <p id="sidebarUserName" class="truncate text-sm font-bold">Не авторизовано</p>
-            <p id="sidebarUserStatus" class="truncate text-xs text-app-hint">Вхід не виконано</p>
+          <div class="min-w-0 flex-1">
+            <p id="sidebarUserName" class="truncate text-xs font-bold">Не авторизовано</p>
+            <p id="sidebarUserStatus" class="truncate text-[10px] text-app-hint">Вхід не виконано</p>
           </div>
         </div>
 
-        <button id="myDecksButton" class="primary-button mt-3 flex w-full items-center justify-between rounded-2xl px-4 py-3 text-sm font-bold shadow-sm transition hover:brightness-95" type="button">
-          <span class="flex items-center gap-2.5">
-            <i data-lucide="library-big" class="h-5 w-5" aria-hidden="true"></i>
-            Мої колоди Anki
+        <div class="mt-2.5 grid grid-cols-2 gap-2">
+          <button id="myDecksButton" class="primary-button flex items-center justify-center gap-1.5 rounded-xl px-2 py-2 text-[11px] font-bold shadow-sm transition hover:brightness-95" type="button">
+            <i data-lucide="library-big" class="h-4 w-4" aria-hidden="true"></i>
+            Колоди
+          </button>
+          <button id="stylesNavButton" class="ghost-button flex items-center justify-center gap-1.5 rounded-xl border muted-surface border-app-hint/10 px-2 py-2 text-[11px] font-bold transition hover:bg-app-hint/5" type="button">
+            <i data-lucide="palette" class="h-4 w-4 text-violet-400" aria-hidden="true"></i>
+            Стилі
+          </button>
+        </div>
+
+        <button id="sidebarProcessButton" class="ghost-button mt-2 flex w-full items-center justify-between rounded-xl border muted-surface border-app-hint/10 px-3 py-2 text-xs font-bold transition hover:bg-app-hint/5" type="button" title="Відкрити монітор процесів">
+          <span class="flex items-center gap-2">
+            <i data-lucide="cpu" class="h-4 w-4 text-violet-400" aria-hidden="true"></i>
+            Процеси та ШІ
           </span>
-          <i data-lucide="chevron-right" class="h-4 w-4" aria-hidden="true"></i>
+          <span id="sidebarProcessBadge" class="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-extrabold text-emerald-500">Готовий</span>
         </button>
       </div>
 
       <div class="safe-left safe-right min-h-0 flex-1 overflow-y-auto scroll-area">
-        <section id="deckListPanel" class="px-4 py-5">
-          <div class="mb-3 flex items-center justify-between gap-3">
-            <div>
-              <h2 class="text-sm font-extrabold">Ваші колоди</h2>
-              <p id="deckSummary" class="mt-0.5 text-xs text-app-hint">0 карток у 0 колодах</p>
+        <section id="deckListPanel" class="px-3 py-3">
+          <div class="mb-2 flex items-center justify-between gap-2">
+            <div class="min-w-0">
+              <h2 class="text-xs font-extrabold uppercase tracking-wide text-app-hint">Ваші колоди</h2>
+              <p id="deckSummary" class="mt-0.5 text-[10px] text-app-hint">0 карток у 0 колодах</p>
             </div>
-            <button id="addDeckButton" class="icon-button" type="button" aria-label="Створити колоду" title="Створити колоду">
-              <i data-lucide="plus" class="h-5 w-5" aria-hidden="true"></i>
-            </button>
-          </div>
-          <div id="deckList" class="space-y-3"></div>
-          <div id="emptyDecksState" class="hidden rounded-2xl border border-dashed p-6 text-center muted-surface border-app-hint/30">
-            <div class="mx-auto flex h-11 w-11 items-center justify-center rounded-2xl bg-app-button/10 text-app-button">
-              <i data-lucide="library" class="h-5 w-5" aria-hidden="true"></i>
-            </div>
-            <p class="mt-3 text-sm font-bold">Ще немає колод</p>
-            <p class="mt-1 text-xs text-app-hint">Створіть першу колоду або збережіть картки з чату.</p>
-          </div>
-        </section>
-
-        <section id="editorPanel" class="hidden px-4 py-5" aria-label="Редактор картки">
-          <button id="editorBackButton" class="ghost-button mb-4 flex items-center gap-2 rounded-xl px-2 py-2 text-sm font-bold" type="button">
-            <i data-lucide="arrow-left" class="h-4 w-4" aria-hidden="true"></i>
-            До колод
-          </button>
-
-          <div class="rounded-2xl border border-app-link/25 bg-app-link/5 p-4">
-            <div class="flex items-start gap-3">
-              <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-app-link/12 text-app-button">
-                <i data-lucide="square-pen" class="h-5 w-5" aria-hidden="true"></i>
-              </div>
-              <div class="min-w-0 flex-1">
-                <p class="text-[11px] font-bold uppercase tracking-wider text-app-button">Редактор колоди</p>
-                <h2 id="editorDeckTitle" class="mt-0.5 truncate text-base font-extrabold">Колода</h2>
-                <p id="editorDeckPath" class="mt-0.5 truncate text-[11px] font-medium text-app-hint"></p>
-              </div>
-            </div>
-          </div>
-
-          <div class="mt-5 flex items-center gap-2">
-            <button id="previousCardButton" class="icon-button border muted-surface border-app-hint/10" type="button" aria-label="Попередня картка">
-              <i data-lucide="chevron-left" class="h-5 w-5" aria-hidden="true"></i>
-            </button>
-            <label class="min-w-0 flex-1">
-              <span class="sr-only">Обрати картку</span>
-              <select id="editorCardSelect" class="w-full appearance-none rounded-xl border muted-surface border-app-hint/10 bg-app-bg px-3 py-2.5 text-sm font-semibold text-app-text"></select>
-            </label>
-            <button id="nextCardButton" class="icon-button border muted-surface border-app-hint/10" type="button" aria-label="Наступна картка">
-              <i data-lucide="chevron-right" class="h-5 w-5" aria-hidden="true"></i>
-            </button>
-          </div>
-
-          <div class="mt-3 flex items-center justify-between text-xs text-app-hint">
-            <span id="editorCardPosition">Картка 1 з 1</span>
-            <span id="editorSavedState" class="flex items-center gap-1.5">
-              <i data-lucide="cloud-check" class="h-3.5 w-3.5" aria-hidden="true"></i>
-              Збережено
-            </span>
-          </div>
-
-          <div id="editorFields" class="mt-5 space-y-4"></div>
-
-          <div class="mt-5">
-            <div class="flex items-center gap-2">
-              <button id="deckStyleToggle" class="flex min-w-0 flex-1 items-center justify-between gap-2 rounded-xl border muted-surface border-app-hint/10 px-3 py-2.5 text-left transition hover:bg-app-hint/5" type="button" aria-expanded="false" aria-controls="deckStylePanel">
-                <span class="flex min-w-0 items-center gap-2 text-xs font-bold">
-                  <i data-lucide="braces" class="h-3.5 w-3.5 shrink-0 text-violet-400" aria-hidden="true"></i>
-                  Стиль колоди
-                  <span id="editorStyleName" class="deck-style-active-name">Основний</span>
-                </span>
-                <i data-lucide="chevron-down" id="deckStyleChevron" class="h-4 w-4 shrink-0 text-app-hint transition-transform" aria-hidden="true"></i>
-              </button>
-              <button id="openStylesButton" class="ghost-button flex shrink-0 items-center justify-center gap-1.5 rounded-xl border muted-surface border-app-hint/10 px-3 py-2.5 text-xs font-bold transition hover:bg-app-hint/5" type="button" title="Збережені стилі колоди">
-                <i data-lucide="library" class="h-3.5 w-3.5 text-violet-400" aria-hidden="true"></i>
-                Стилі
-              </button>
-            </div>
-
-            <div id="deckStylePanel" class="mt-3 hidden">
-              <p class="mb-2 text-[11px] leading-relaxed text-app-hint">
-                Один CSS на всі поля колоди: він і збережений у стилі, і потрапляє у файл <span class="font-mono">.apkg</span>. Натисніть «Стилі», щоб перейменувати або обрати збережений.
-              </p>
-              <label class="block">
-                <span class="sr-only">CSS колоди</span>
-                <textarea id="editorModelCss" class="field-control min-h-32 font-mono text-xs leading-5" spellcheck="false" placeholder=".card {\n  font-family: system-ui, sans-serif;\n}\n\n.anki-field-name {\n  text-transform: none;\n}"></textarea>
-              </label>
-              <button id="saveDeckStyleButton" class="ghost-button mt-2 flex w-full items-center justify-center gap-2 rounded-xl border muted-surface border-app-hint/10 px-3 py-2.5 text-sm font-bold transition hover:bg-app-hint/5" type="button">
-                <i data-lucide="paint-bucket" class="h-4 w-4 text-violet-400" aria-hidden="true"></i>
-                Зберегти стиль
-              </button>
-            </div>
-          </div>
-
-          <div class="mt-5 grid grid-cols-2 gap-2">
-            <button id="saveCardButton" class="primary-button flex items-center justify-center gap-2 rounded-xl px-3 py-3 text-sm font-bold" type="button">
-              <i data-lucide="save" class="h-4 w-4" aria-hidden="true"></i>
-              Зберегти
-            </button>
-            <button id="addCardButton" class="ghost-button flex items-center justify-center gap-2 rounded-xl border muted-surface border-app-hint/10 px-3 py-3 text-sm font-bold" type="button">
+            <button id="addDeckButton" class="icon-button h-8 w-8" type="button" aria-label="Створити колоду" title="Створити колоду">
               <i data-lucide="plus" class="h-4 w-4" aria-hidden="true"></i>
-              Нова картка
             </button>
           </div>
-          <button id="deleteCardButton" class="mt-3 flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-semibold text-red-500 transition hover:bg-red-500/10" type="button">
-            <i data-lucide="trash-2" class="h-4 w-4" aria-hidden="true"></i>
-            Видалити картку
-          </button>
-          <button id="clearDeckButton" class="mt-2 flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-semibold text-red-500/80 transition hover:bg-red-500/10 hover:text-red-500" type="button">
-            <i data-lucide="eraser" class="h-4 w-4" aria-hidden="true"></i>
-            Очистити колоду від карток
-          </button>
+          <div id="deckList" class="space-y-2.5"></div>
+          <div id="emptyDecksState" class="hidden rounded-2xl border border-dashed p-5 text-center muted-surface border-app-hint/30">
+            <div class="mx-auto flex h-10 w-10 items-center justify-center rounded-xl bg-app-button/10 text-app-button">
+              <i data-lucide="library" class="h-4 w-4" aria-hidden="true"></i>
+            </div>
+            <p class="mt-2 text-xs font-bold">Ще немає колод</p>
+            <p class="mt-1 text-[10px] text-app-hint">Створіть першу колоду або збережіть картки з чату.</p>
+          </div>
         </section>
       </div>
 
-      <div class="safe-left safe-right border-t border-app-hint/10 px-4 py-3">
+      <div class="safe-left safe-right border-t border-app-hint/10 px-3 py-2.5">
         <div class="flex flex-col gap-2">
-          <div class="flex items-center gap-2 text-[11px] font-medium text-app-hint">
+          <div class="flex items-center gap-2 text-[10px] font-medium text-app-hint">
             <span id="storageStatusDot" class="h-2 w-2 rounded-full bg-emerald-500"></span>
             <span id="storageStatusText">Дані збережено локально</span>
           </div>
-          <button id="logoutButton" class="ghost-button flex w-full items-center justify-center gap-2 rounded-xl border muted-surface border-app-hint/10 px-3 py-2 text-xs font-bold transition hover:bg-red-500/8 hover:text-red-500" type="button">
+          <button id="logoutButton" class="ghost-button flex w-full items-center justify-center gap-2 rounded-lg border muted-surface border-app-hint/10 px-3 py-1.5 text-[11px] font-bold transition hover:bg-red-500/8 hover:text-red-500" type="button">
             Вийти
           </button>
         </div>
@@ -287,6 +284,13 @@
         </div>
 
         <div class="flex items-center gap-2">
+          <button id="openProcessDrawerButton" class="icon-button relative shrink-0" type="button" aria-label="Монітор процесів ШІ" title="Монітор процесів та пошуку моделей">
+            <i data-lucide="activity" class="h-5 w-5 text-violet-400" aria-hidden="true"></i>
+            <span class="absolute -top-0.5 -right-0.5 flex h-2.5 w-2.5">
+              <span id="processHeaderPing" class="hidden absolute inline-flex h-full w-full animate-ping rounded-full bg-violet-400 opacity-75"></span>
+              <span id="processHeaderDot" class="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500"></span>
+            </span>
+          </button>
           <button id="themeToggleButton" class="icon-button shrink-0" type="button" aria-label="Перемкнути тему" aria-pressed="false" title="Світла або темна тема">
             <i data-lucide="moon" class="h-5 w-5" aria-hidden="true"></i>
           </button>
@@ -294,7 +298,7 @@
             <p id="headerUserName" class="max-w-36 truncate text-xs font-bold">Не авторизовано</p>
             <p id="headerUserStatus" class="max-w-36 truncate text-[10px] text-app-hint">Вхід не виконано</p>
           </div>
-          <div id="headerAvatar" class="ai-gradient flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full text-xs font-bold text-white">вЂ”</div>
+          <div id="headerAvatar" class="ai-gradient flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full text-xs font-bold text-white">—</div>
         </div>
       </header>
 
@@ -346,6 +350,172 @@
     </main>
   </div>
 
+  <!-- Велике вікно колоди: картки / стиль / налаштування.
+       Раніше редактор жив у вузькій бічній панелі, через що CSS і список
+       карток не вміщалися. Тепер це overlay, а панель лишається лише
+       навігацією по колодах. -->
+  <div id="deckWindow" class="fixed inset-0 z-[75] hidden items-center justify-center bg-slate-950/55 p-0 backdrop-blur-sm sm:p-4" role="dialog" aria-modal="true" aria-labelledby="editorDeckTitle">
+    <div id="editorPanel" class="modal-enter safe-top safe-bottom flex h-full w-full max-w-5xl flex-col overflow-hidden border surface bg-app-surface shadow-soft sm:h-[min(92vh,940px)] sm:rounded-3xl">
+      <div class="flex items-start gap-3 border-b border-app-hint/10 p-4 sm:p-5">
+        <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-app-link/10 text-app-button">
+          <i data-lucide="square-pen" class="h-5 w-5" aria-hidden="true"></i>
+        </div>
+        <div class="min-w-0 flex-1">
+          <p class="text-[11px] font-bold uppercase tracking-wider text-app-button">Вікно колоди</p>
+          <h2 id="editorDeckTitle" class="mt-0.5 truncate text-lg font-extrabold">Колода</h2>
+          <p id="editorDeckPath" class="mt-0.5 truncate text-[11px] font-medium text-app-hint"></p>
+        </div>
+        <button id="editorBackButton" class="icon-button -mr-2 -mt-2" type="button" aria-label="Закрити вікно колоди">
+          <i data-lucide="x" class="h-5 w-5" aria-hidden="true"></i>
+        </button>
+      </div>
+
+      <div id="deckTabs" class="flex shrink-0 gap-1 border-b border-app-hint/10 px-3 pt-2 sm:px-5" role="tablist" aria-label="Розділи колоди">
+        <button id="deckTabCards" class="deck-tab is-active" type="button" role="tab" aria-selected="true" aria-controls="deckCardsPane" data-deck-tab="cards">
+          <i data-lucide="layers" class="h-4 w-4" aria-hidden="true"></i>
+          Картки
+        </button>
+        <button id="deckTabStyle" class="deck-tab" type="button" role="tab" aria-selected="false" aria-controls="deckStylePane" data-deck-tab="style">
+          <i data-lucide="palette" class="h-4 w-4" aria-hidden="true"></i>
+          Стиль
+        </button>
+        <button id="deckTabSettings" class="deck-tab" type="button" role="tab" aria-selected="false" aria-controls="deckSettingsPane" data-deck-tab="settings">
+          <i data-lucide="settings-2" class="h-4 w-4" aria-hidden="true"></i>
+          Налаштування
+        </button>
+      </div>
+
+      <div class="min-h-0 flex-1 overflow-y-auto scroll-area">
+        <section id="deckCardsPane" class="p-4 sm:p-5" role="tabpanel" aria-labelledby="deckTabCards">
+          <div class="flex items-center gap-2">
+            <button id="previousCardButton" class="icon-button border muted-surface border-app-hint/10" type="button" aria-label="Попередня картка">
+              <i data-lucide="chevron-left" class="h-5 w-5" aria-hidden="true"></i>
+            </button>
+            <label class="min-w-0 flex-1">
+              <span class="sr-only">Обрати картку</span>
+              <select id="editorCardSelect" class="w-full appearance-none rounded-xl border muted-surface border-app-hint/10 bg-app-bg px-3 py-2.5 text-sm font-semibold text-app-text"></select>
+            </label>
+            <button id="nextCardButton" class="icon-button border muted-surface border-app-hint/10" type="button" aria-label="Наступна картка">
+              <i data-lucide="chevron-right" class="h-5 w-5" aria-hidden="true"></i>
+            </button>
+          </div>
+
+          <div class="mt-3 flex items-center justify-between text-xs text-app-hint">
+            <span id="editorCardPosition">Картка 1 з 1</span>
+            <span id="editorSavedState" class="flex items-center gap-1.5">
+              <i data-lucide="cloud-check" class="h-3.5 w-3.5" aria-hidden="true"></i>
+              Збережено
+            </span>
+          </div>
+
+          <div id="editorFields" class="mt-5 grid gap-4 sm:grid-cols-2"></div>
+
+          <div class="mt-6 grid grid-cols-2 gap-2">
+            <button id="saveCardButton" class="primary-button flex items-center justify-center gap-2 rounded-xl px-3 py-3 text-sm font-bold" type="button">
+              <i data-lucide="save" class="h-4 w-4" aria-hidden="true"></i>
+              Зберегти
+            </button>
+            <button id="addCardButton" class="ghost-button flex items-center justify-center gap-2 rounded-xl border muted-surface border-app-hint/10 px-3 py-3 text-sm font-bold" type="button">
+              <i data-lucide="plus" class="h-4 w-4" aria-hidden="true"></i>
+              Нова картка
+            </button>
+          </div>
+          <button id="deleteCardButton" class="mt-3 flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-semibold text-red-500 transition hover:bg-red-500/10" type="button">
+            <i data-lucide="trash-2" class="h-4 w-4" aria-hidden="true"></i>
+            Видалити картку
+          </button>
+        </section>
+
+        <section id="deckStylePane" class="hidden p-4 sm:p-5" role="tabpanel" aria-labelledby="deckTabStyle">
+          <div class="rounded-2xl border border-violet-500/25 bg-violet-500/5 p-4">
+            <div class="flex flex-wrap items-start justify-between gap-3">
+              <div class="min-w-0">
+                <p class="text-[11px] font-bold uppercase tracking-wider text-violet-400">Активний стиль колоди</p>
+                <p id="editorStyleName" class="deck-style-active-name mt-1 truncate text-sm font-extrabold">Стиль не вибрано</p>
+                <p class="mt-1 text-[11px] leading-5 text-app-hint">Стиль спільний для акаунта: зміна тут застосується до всіх колод, які його використовують.</p>
+              </div>
+              <button id="openStylesButton" class="ghost-button flex shrink-0 items-center justify-center gap-1.5 rounded-xl border muted-surface border-app-hint/10 px-3 py-2 text-xs font-bold transition hover:bg-app-hint/5" type="button" title="Бібліотека стилів акаунта">
+                <i data-lucide="library" class="h-3.5 w-3.5 text-violet-400" aria-hidden="true"></i>
+                Бібліотека
+              </button>
+            </div>
+            <label class="mt-3 block">
+              <span class="mb-1 block text-[10px] font-bold uppercase tracking-wide text-app-hint">Назва стилю</span>
+              <input id="deckStyleNameInput" class="field-control" type="text" maxlength="60" autocomplete="off" placeholder="Наприклад: темний">
+            </label>
+          </div>
+
+          <div class="mt-5">
+            <div class="mb-2 flex items-center justify-between gap-2">
+              <h3 class="text-xs font-extrabold uppercase tracking-wide text-app-hint">Стилі акаунта</h3>
+              <button id="createDeckStyleButton" class="ghost-button flex items-center gap-1.5 rounded-lg border muted-surface border-app-hint/10 px-2.5 py-1.5 text-[11px] font-bold transition hover:bg-app-hint/5" type="button">
+                <i data-lucide="plus" class="h-3.5 w-3.5" aria-hidden="true"></i>
+                Створити з CSS
+              </button>
+            </div>
+            <div id="deckStyleList" class="grid gap-2 sm:grid-cols-2"></div>
+          </div>
+
+          <div class="mt-6">
+            <button id="deckStyleToggle" class="flex w-full items-center justify-between gap-2 rounded-xl border muted-surface border-app-hint/10 px-3 py-2.5 text-left transition hover:bg-app-hint/5" type="button" aria-expanded="false" aria-controls="deckStylePanel">
+              <span class="flex min-w-0 items-center gap-2 text-xs font-bold">
+                <i data-lucide="braces" class="h-3.5 w-3.5 shrink-0 text-violet-400" aria-hidden="true"></i>
+                Ручний CSS активного стилю
+              </span>
+              <i data-lucide="chevron-down" id="deckStyleChevron" class="h-4 w-4 shrink-0 text-app-hint transition-transform" aria-hidden="true"></i>
+            </button>
+
+            <div id="deckStylePanel" class="mt-3 hidden">
+              <p class="mb-2 text-[11px] leading-relaxed text-app-hint">
+                Один CSS на всі поля. Він зберігається у спільному стилі та потрапляє у файл <span class="font-mono">.apkg</span>.
+              </p>
+              <label class="block">
+                <span class="sr-only">CSS колоди</span>
+                <textarea id="editorModelCss" class="field-control min-h-40 font-mono text-xs leading-5" spellcheck="false" placeholder=".card {&#10;  font-family: system-ui, sans-serif;&#10;}&#10;&#10;.anki-field-name {&#10;  text-transform: none;&#10;}"></textarea>
+              </label>
+              <button id="saveDeckStyleButton" class="ghost-button mt-2 flex w-full items-center justify-center gap-2 rounded-xl border muted-surface border-app-hint/10 px-3 py-2.5 text-sm font-bold transition hover:bg-app-hint/5" type="button">
+                <i data-lucide="paint-bucket" class="h-4 w-4 text-violet-400" aria-hidden="true"></i>
+                Зберегти стиль для всіх колод
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <section id="deckSettingsPane" class="hidden p-4 sm:p-5" role="tabpanel" aria-labelledby="deckTabSettings">
+          <div class="rounded-2xl border muted-surface border-app-hint/15 p-4">
+            <h3 class="text-xs font-extrabold uppercase tracking-wide text-app-hint">Колода</h3>
+            <dl class="mt-3 grid gap-2 text-xs sm:grid-cols-2">
+              <div class="rounded-xl bg-app-hint/5 px-3 py-2">
+                <dt class="text-[10px] font-bold uppercase text-app-hint">Карток</dt>
+                <dd id="deckSettingsCardCount" class="mt-0.5 font-bold">0</dd>
+              </div>
+              <div class="rounded-xl bg-app-hint/5 px-3 py-2">
+                <dt class="text-[10px] font-bold uppercase text-app-hint">Стиль</dt>
+                <dd id="deckSettingsStyleName" class="mt-0.5 truncate font-bold">—</dd>
+              </div>
+            </dl>
+            <p class="mt-3 text-[11px] leading-5 text-app-hint">Назву й місце в дереві змінюйте в списку колод: там же перенесення в іншу гілку.</p>
+          </div>
+
+          <div class="mt-4 grid gap-2 sm:grid-cols-3">
+            <button id="deckSettingsPreviewButton" class="ghost-button flex items-center justify-center gap-2 rounded-xl border muted-surface border-app-hint/10 px-3 py-2.5 text-xs font-bold transition hover:bg-emerald-500/10 hover:text-emerald-500" type="button" title="Переглянути картки як в Anki">
+              <i data-lucide="eye" class="h-4 w-4" aria-hidden="true"></i>
+              Переглянути картки
+            </button>
+            <button id="deckSettingsDownloadButton" class="ghost-button flex items-center justify-center gap-2 rounded-xl border muted-surface border-app-hint/10 px-3 py-2.5 text-xs font-bold transition hover:bg-app-link/8 hover:text-app-button" type="button">
+              <i data-lucide="download" class="h-4 w-4" aria-hidden="true"></i>
+              Завантажити .apkg
+            </button>
+            <button id="clearDeckButton" class="flex items-center justify-center gap-2 rounded-xl border border-red-500/20 px-3 py-2.5 text-xs font-bold text-red-500/80 transition hover:bg-red-500/10 hover:text-red-500" type="button">
+              <i data-lucide="eraser" class="h-4 w-4" aria-hidden="true"></i>
+              Очистити від карток
+            </button>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+
   <div id="deckModal" class="fixed inset-0 z-[80] hidden items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="deckModalTitle">
     <div class="modal-enter safe-top safe-bottom max-h-full w-full max-w-lg overflow-y-auto rounded-3xl border surface bg-app-surface p-5 shadow-soft scroll-area sm:p-6">
       <div class="flex items-start gap-3">
@@ -388,8 +558,8 @@
           <i data-lucide="library" class="h-5 w-5" aria-hidden="true"></i>
         </div>
         <div class="min-w-0 flex-1">
-          <h2 id="styleModalTitle" class="text-lg font-extrabold">Стилі колоди</h2>
-          <p id="styleModalDeckName" class="mt-1 truncate text-sm text-app-hint">Моя колода</p>
+          <h2 id="styleModalTitle" class="text-lg font-extrabold">Бібліотека стилів</h2>
+          <p id="styleModalDeckName" class="mt-1 truncate text-sm text-app-hint">Спільна для всіх колод акаунта</p>
         </div>
         <button id="closeStyleModalButton" class="icon-button -mr-2 -mt-2" type="button" aria-label="Закрити">
           <i data-lucide="x" class="h-5 w-5" aria-hidden="true"></i>
@@ -398,14 +568,30 @@
 
       <div class="min-h-0 flex-1 overflow-y-auto scroll-area px-4 pb-2 sm:px-5">
         <p class="mb-2 text-[11px] leading-relaxed text-app-hint">
-          Кожен стиль — один CSS на всі поля. Обраний стиль застосовується до всіх карток колоди й потрапляє у <span class="font-mono">.apkg</span>.
+          Кожен стиль — один CSS на всі поля. Стилі належать акаунту, а не колоді: ними можна поділитися між колодами й обрати один для Gemini.
         </p>
         <div id="styleList" class="grid gap-2"></div>
+
+        <div id="styleEditorWrap" class="mt-4 hidden rounded-2xl border muted-surface border-app-hint/15 p-3">
+          <h3 class="text-xs font-extrabold uppercase tracking-wide text-app-hint">Редагування стилю</h3>
+          <label class="mt-2 block">
+            <span class="mb-1 block text-[10px] font-bold uppercase tracking-wide text-app-hint">Назва</span>
+            <input id="styleEditorName" class="field-control" type="text" maxlength="60" autocomplete="off">
+          </label>
+          <label class="mt-2 block">
+            <span class="mb-1 block text-[10px] font-bold uppercase tracking-wide text-app-hint">CSS</span>
+            <textarea id="styleEditorCss" class="field-control min-h-32 font-mono text-xs leading-5" spellcheck="false" placeholder=".card {&#10;  font-family: system-ui, sans-serif;&#10;}"></textarea>
+          </label>
+          <button id="saveStyleEditorButton" class="ghost-button mt-2 flex w-full items-center justify-center gap-2 rounded-xl border muted-surface border-app-hint/10 px-3 py-2.5 text-sm font-bold transition hover:bg-app-hint/5" type="button">
+            <i data-lucide="save" class="h-4 w-4 text-violet-400" aria-hidden="true"></i>
+            Зберегти для всього акаунта
+          </button>
+        </div>
       </div>
 
       <div class="border-t border-app-hint/10 p-4 sm:p-5">
         <label class="block">
-          <span class="mb-1.5 block text-xs font-bold text-app-hint">Зберегти поточний CSS як новий стиль</span>
+          <span class="mb-1.5 block text-xs font-bold text-app-hint">Новий стиль із поточного CSS колоди</span>
           <input id="newStyleName" class="field-control" type="text" maxlength="60" placeholder="Наприклад: темний" autocomplete="off">
         </label>
         <div class="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
@@ -481,12 +667,12 @@
     <span id="toastText"></span>
   </div>
 
-<script src="js/runtime.js?v=20260928l"></script>
-<script src="js/auth.js?v=20260928l"></script>
-<script src="js/model.js?v=20260928l"></script>
-<script src="js/decks.js?v=20260928l"></script>
-  <script src="js/chat.js?v=20260928l"></script>
-  <script src="js/app.js?v=20260928l"></script>
+<script src="js/runtime.js?v=20261103a"></script>
+<script src="js/auth.js?v=20261103a"></script>
+<script src="js/model.js?v=20261103a"></script>
+<script src="js/decks.js?v=20261103a"></script>
+  <script src="js/chat.js?v=20261103a"></script>
+  <script src="js/app.js?v=20261103a"></script>
 </body>
 </html>
 

@@ -465,104 +465,215 @@ sandbox.appState.decks = [
   // запис запитів, щоб перевірити, що саме пішло на сервер.
   sandbox.apiRequestJson = recordApi;
 
-  // --- 6. Стиль колоди і очищення карток ----------------------------------
+  console.log('\nСинхронізація: локальна копія «Основного» отримує серверний id');
+  // Реальний випадок із логів: у двох вкладках «Основний» створився з
+  // різними id. Після перезавантаження локальна копія йшла на POST і
+  // отримувала 409, а колода лишалася з style_id, якого на сервері немає.
+  const remoteMainId = '11111111-1111-4111-8111-111111111111';
+  const localMainId = '22222222-2222-4222-8222-222222222222';
+  const syncCalls = [];
+  sandbox.apiRequestJson = async (path, options = {}) => {
+    syncCalls.push({ path, method: options.method || 'GET', body: options.body || '' });
+    if (path === '/api/styles' && (options.method || 'GET') === 'GET') {
+      return { styles: [{
+        id: remoteMainId, name: 'Основний', css: '.card { color: #111; }', updatedAt: 1
+      }] };
+    }
+    if (path === '/api/styles' && options.method === 'POST') {
+      const error = new Error('duplicate');
+      error.status = 409;
+      throw error;
+    }
+    return {};
+  };
+  sandbox.appState.styleLibrary = [{
+    id: localMainId, name: 'Основний', css: '.card { color: #111; }', updatedAt: 1
+  }];
+  sandbox.appState.decks = [{
+    id: '33333333-3333-4333-8333-333333333333', title: 'Локальна', parentId: null,
+    styleId: localMainId, modelCss: '.card { color: #111; }',
+    fieldNames: ['Питання'], cards: []
+  }];
+  sandbox.appState.selectedStyleId = localMainId;
+  sandbox.appState.generationStyleId = localMainId;
+  await sandbox.syncStylesFromServer();
+  check('у бібліотеці одна «Основний», а не дві', sandbox.styleLibrary().length, 1);
+  check('лишився серверний id', sandbox.styleLibrary()[0].id, remoteMainId);
+  check('колода переприв’язана на серверний id',
+    sandbox.appState.decks[0].styleId, remoteMainId);
+  check('вибір стилю теж переприв’язано', sandbox.appState.selectedStyleId, remoteMainId);
+  check('стиль для генерації теж', sandbox.appState.generationStyleId, remoteMainId);
+  ok('локальну копію не відправляли на сервер',
+    !syncCalls.some(call => call.method === 'POST' && call.path === '/api/styles'),
+    JSON.stringify(syncCalls));
+  const reboundPosts = syncCalls.filter(call =>
+    call.path === '/api/decks' && call.method === 'POST');
+  check('переприв’язана колода дійшла до сервера', reboundPosts.length, 1);
+  check('у ній уже серверний styleId',
+    JSON.parse(reboundPosts[0].body).style_id, remoteMainId);
+  sandbox.apiRequestJson = recordApi;
+  sandbox.appState.styleLibrary = [];
+  sandbox.appState.decks = [];
+  sandbox.appState.selectedStyleId = null;
+  sandbox.appState.generationStyleId = '';
+
+  console.log('\nНова колода: спільний стиль за замовчуванням');
+  sandbox.appState.styleLibrary = [];
+  sandbox.appState.decks = [];
+  const firstNewDeck = sandbox.createDeck('Нова', []);
+  ok('нова колода одразу має styleId', Boolean(firstNewDeck.styleId), String(firstNewDeck.styleId));
+  check('стиль додано до бібліотеки акаунта', sandbox.styleLibrary().length, 1);
+  check('styleId вказує саме на стиль бібліотеки',
+    firstNewDeck.styleId, sandbox.styleLibrary()[0].id);
+  check('CSS колоди — знімок стилю',
+    firstNewDeck.modelCss, sandbox.styleLibrary()[0].css);
+  const secondNewDeck = sandbox.createDeck('Друга', []);
+  check('друга колода не плодить копію «Основного»', sandbox.styleLibrary().length, 1);
+  check('друга колода прив\'язана до того ж стилю',
+    secondNewDeck.styleId, firstNewDeck.styleId);
+  apiCalls.length = 0;
+  await sandbox.pushDeckStyles([firstNewDeck, secondNewDeck]);
+  ok('стиль надіслано на сервер один раз і до колод', apiCalls.length === 1
+    && apiCalls[0].path === '/api/styles' && apiCalls[0].method === 'POST',
+    JSON.stringify(apiCalls));
+
+  console.log('\nCSS із чату для нової колоди не переписує спільний стиль');
+  const sharedStyle = sandbox.styleLibrary()[0];
+  const sharedCssBefore = sharedStyle.css;
+  apiCalls.length = 0;
+  await sandbox.applyFreshDeckModelCss(firstNewDeck, '.card { color: #abcdef; }');
+  check('«Основний» не переписано', sharedStyle.css, sharedCssBefore);
+  check('нова колода отримала власний стиль', sandbox.styleLibrary().length, 2);
+  check('власний стиль містить CSS із чату',
+    sandbox.findLibraryStyle(firstNewDeck.styleId).css, '.card { color: #abcdef; }');
+  check('друга колода лишилась на «Основному»',
+    secondNewDeck.styleId, sharedStyle.id);
+  ok('окремий стиль пішов на сервер раніше за колоду', apiCalls.some(call =>
+    call.path === '/api/styles' && call.method === 'POST'), JSON.stringify(apiCalls));
+
+  // --- 6. Спільна бібліотека стилів і очищення карток ----------------------
 
   console.log('\nСтиль колоди: один CSS на всі поля');
-  // Колода проходить через migrateDeck, як у браузері: тоді й бібліотека
-  // стилів з'являється з тієї самої митті, що й у реальному застосунку.
+  // Стара колода зі styles.items проходить міграцію в спільну бібліотеку:
+  // саме так поводиться застосунок під час першого входу після оновлення.
   const styleDeck = sandbox.migrateDeck({
     id: STYLE, title: 'HTTP', parentId: null,
     fieldNames: ['Код', 'Назва', 'Приклад'], modelCss: '.card { color: #123456; }',
     cards: []
   });
+  sandbox.appState.styleLibrary = [];
   sandbox.appState.decks = [styleDeck];
+  sandbox.migrateLegacyDeckStyles();
+  sandbox.bindDecksToStyles();
   sandbox.appState.editorDeckId = STYLE;
   sandbox.appState.editorCardId = null;
+  sandbox.appState.styleDeckId = STYLE;
   sandbox.renderEditor();
   check('стиль колоди показано в textarea',
     sandbox.elements.editorModelCss.value, '.card { color: #123456; }');
   check('у редакторі видно назву активного стилю',
     sandbox.elements.editorStyleName.textContent, 'Основний');
-  check('колода народилася з одним стилем', sandbox.styleLibrary(styleDeck).length, 1);
-  // Одного CSS на всі поля вистачає: п'ять ідентичних селекторів у списку
-  // означали б п'ять однакових копій, які треба тримати синхронними руками.
+  check('старий стиль переїхав у спільну бібліотеку', sandbox.styleLibrary().length, 1);
+  check('колода посилається на стиль із бібліотеки', styleDeck.styleId,
+    sandbox.styleLibrary()[0].id);
   ok('кнопок-селекторів полів більше немає', !decksSource.includes('data-field-selector'), '');
   ok('розмітка більше не містить контейнера чіпів', !html.includes('deckStyleFields'), '');
   ok('жодного селектора конкретного поля не вставляється',
     !decksSource.includes('insertFieldSelector'), '');
 
-  console.log('\nБібліотека стилів: перейменування');
+  console.log('\nБібліотека стилів: редагування назви й CSS');
   sandbox.openStyleModal();
   ok('вікно стилів відкрите', !sandbox.elements.styleModal.classList.contains('hidden'), '');
-  check('у вікні названо колоду', sandbox.elements.styleModalDeckName.textContent, 'HTTP');
+  ok('у вікні названо контекст бібліотеки',
+    sandbox.elements.styleModalDeckName.textContent.includes('HTTP'),
+    sandbox.elements.styleModalDeckName.textContent);
   ok('стиль видно в списку',
     sandbox.elements.styleList.innerHTML.includes('Основний'),
     sandbox.elements.styleList.innerHTML.slice(0, 200));
   ok('активний стиль позначено',
     sandbox.elements.styleList.innerHTML.includes('style-badge'), '');
-  const mainId = styleDeck.styles.activeId;
-  check('перейменування не змінює id стилю',
-    sandbox.commitStyleRename(mainId, '  Основний чорний  '), true);
+  const mainId = sandbox.styleLibrary()[0].id;
+  sandbox.selectStyleForEditing(mainId);
+  sandbox.elements.styleEditorName.value = '  Основний чорний  ';
+  sandbox.elements.styleEditorCss.value = '.card { color: #abcdef; }';
+  apiCalls.length = 0;
+  await sandbox.saveStyleEditor();
   check('назву обрізано й витрізано',
-    sandbox.styleLibrary(styleDeck)[0].name, 'Основний чорний');
+    sandbox.styleLibrary()[0].name, 'Основний чорний');
   check('у редакторі видно нову назву',
     sandbox.elements.editorStyleName.textContent, 'Основний чорний');
-  check('перейменування не змінює CSS',
-    sandbox.styleLibrary(styleDeck)[0].css, '.card { color: #123456; }');
-  check('порожня назва відхиляється', sandbox.commitStyleRename(mainId, '   '), false);
-  check('назва після відхилу не змінилась',
-    sandbox.styleLibrary(styleDeck)[0].name, 'Основний чорний');
+  check('CSS оновлено в бібліотеці',
+    sandbox.styleLibrary()[0].css, '.card { color: #abcdef; }');
+  check('CSS колоди — знімок того самого стилю',
+    styleDeck.modelCss, '.card { color: #abcdef; }');
+  ok('редагування пішло на сервер окремим запитом', apiCalls.length === 1
+    && apiCalls[0].path === `/api/styles/${mainId}`
+    && apiCalls[0].method === 'PUT',
+    JSON.stringify(apiCalls));
+
+  console.log('\nСпільна бібліотека: один стиль на кілька колод');
+  const secondDeck = sandbox.migrateDeck({
+    id: MATH, title: 'математика', fieldNames: ['Питання'],
+    modelCss: '.card { color: #000; }', cards: []
+  });
+  sandbox.appState.decks = [styleDeck, secondDeck];
+  sandbox.applyStyleToDeck(secondDeck, mainId);
+  sandbox.selectStyleForEditing(mainId);
+  sandbox.elements.styleEditorCss.value = '.card { color: #fedcba; }';
+  await sandbox.saveStyleEditor();
+  check('CSS оновився в першій колоді', styleDeck.modelCss, '.card { color: #fedcba; }');
+  check('CSS оновився і в другій колоді', secondDeck.modelCss, '.card { color: #fedcba; }');
 
   console.log('\nБібліотека стилів: новий стиль і застосування');
+  sandbox.appState.decks = [styleDeck];
+  sandbox.appState.styleDeckId = STYLE;
   sandbox.elements.editorModelCss.value = '.card { background: #000; }';
   sandbox.markDeckStyleDirty();
   sandbox.elements.newStyleName.value = 'Темний';
   apiCalls.length = 0;
   await sandbox.createDeckStyle();
-  check('стилів стало два', sandbox.styleLibrary(styleDeck).length, 2);
-  check('новий стиль активний', styleDeck.styles.activeId !== mainId, true);
-  check('новий стиль узяв CSS із редактора',
-    sandbox.styleLibrary(styleDeck).find(s => s.name === 'Темний').css, '.card { background: #000; }');
+  check('стилів стало два', sandbox.styleLibrary().length, 2);
+  const dark = sandbox.styleLibrary().find(style => style.name === 'Темний');
+  check('новий стиль створено з CSS редактора',
+    dark.css, '.card { background: #000; }');
+  check('новий стиль застосовано до колоди', styleDeck.styleId, dark.id);
   check('CSS колоди синхронізовано', styleDeck.modelCss, '.card { background: #000; }');
-  check('попередньому стилю дісталися незбережені правки',
-    sandbox.styleLibrary(styleDeck).find(s => s.id === mainId).css, '.card { background: #000; }');
-  ok('бібліотека поїхала на сервер', apiCalls.length === 1
-    && apiCalls[0].path === '/api/decks'
-    && JSON.parse(apiCalls[0].body).styles.items.length === 2,
+  ok('стиль і привʼязка колоди поїхали на сервер', apiCalls.some(call => call.path === '/api/styles' && call.method === 'POST')
+    && apiCalls.some(call => call.path === '/api/decks' && call.method === 'POST'),
     JSON.stringify(apiCalls));
   sandbox.elements.newStyleName.value = 'темний';
   apiCalls.length = 0;
   await sandbox.createDeckStyle();
   check('дубль назви (навіть іншим регістром) не створює стиль',
-    sandbox.styleLibrary(styleDeck).length, 2);
+    sandbox.styleLibrary().length, 2);
   ok('про дубль повідомлено', toasts.some(t => /вже є/.test(t.text)),
     JSON.stringify(toasts.slice(-1)));
   check('дубль не пішов на сервер', apiCalls.length, 0);
 
-  const darkId = styleDeck.styles.activeId;
+  console.log('\nЗастосування стилю до колоди з картками');
+  // Головна регресія: раніше колоду з картками не можна було перестилізувати.
+  const darkId = dark.id;
   sandbox.elements.editorModelCss.value = '.card { background: #fff; }';
   sandbox.markDeckStyleDirty();
   await sandbox.applyDeckStyle(mainId);
   check('застосування переносить CSS у редактор',
-    sandbox.elements.editorModelCss.value, '.card { background: #000; }');
-  check('активним став обраний стиль', styleDeck.styles.activeId, mainId);
-  check('CSS колоди теж перемкнувся', styleDeck.modelCss, '.card { background: #000; }');
-  check('застосування не псує незбережений CSS іншого стилю',
-    sandbox.styleLibrary(styleDeck).find(s => s.id === darkId).css, '.card { background: #fff; }');
+    sandbox.elements.editorModelCss.value, '.card { color: #fedcba; }');
+  check('активним став обраний стиль', styleDeck.styleId, mainId);
+  check('CSS колоди теж перемкнувся', styleDeck.modelCss, '.card { color: #fedcba; }');
+  check('незбережений CSS іншого стилю не постраждав',
+    sandbox.styleLibrary().find(style => style.id === darkId).css, '.card { background: #000; }');
 
   console.log('\nБібліотека стилів: видалення');
   confirmCalls.length = 0;
   sandbox.requestDeleteDeckStyle(darkId);
   ok('запитано підтвердження', confirmCalls.length === 1, `викликів: ${confirmCalls.length}`);
-  check('до підтвердження нічого не видалено', sandbox.styleLibrary(styleDeck).length, 2);
+  check('до підтвердження нічого не видалено', sandbox.styleLibrary().length, 2);
   await (confirmCalls[0] || [])[2]();
-  check('стиль видалено', sandbox.styleLibrary(styleDeck).length, 1);
-  check('активний стиль не зник', styleDeck.styles.activeId, mainId);
-  ok('останній стиль не видаляється', (() => {
-    confirmCalls.length = 0;
-    sandbox.requestDeleteDeckStyle(mainId);
-    return confirmCalls.length === 0;
-  })(), '');
+  check('стиль видалено з бібліотеки', sandbox.styleLibrary().length, 1);
+  check('активний стиль не зник', styleDeck.styleId, mainId);
+  ok('видалення пішло на сервер',
+    apiCalls.some(call => call.path === `/api/styles/${darkId}` && call.method === 'DELETE'),
+    JSON.stringify(apiCalls));
 
   console.log('\nСтиль колоди: збереження');
   sandbox.elements.editorModelCss.value = '[data-field="Код"] { color: red; }';
@@ -572,37 +683,32 @@ sandbox.appState.decks = [
   apiCalls.length = 0;
   await sandbox.saveDeckStyle();
   check('CSS збережено в модель колоди',
-    sandbox.appState.decks[0].modelCss, '[data-field="Код"] { color: red; }');
+    styleDeck.modelCss, '[data-field="Код"] { color: red; }');
   check('правка потрапила в активний стиль, а не кудись убік',
-    sandbox.styleLibrary(styleDeck)[0].css, '[data-field="Код"] { color: red; }');
-  ok('стиль доїхав до сервера разом із бібліотекою', apiCalls.length === 1
-    && apiCalls[0].path === '/api/decks'
-    && apiCalls[0].method === 'POST'
-    && JSON.parse(apiCalls[0].body).css === '[data-field="Код"] { color: red; }'
-    && JSON.parse(apiCalls[0].body).styles.items[0].css === '[data-field="Код"] { color: red; }',
+    sandbox.styleLibrary()[0].css, '[data-field="Код"] { color: red; }');
+  ok('стиль доїхав до сервера окремим запитом', apiCalls.length === 1
+    && apiCalls[0].path === `/api/styles/${mainId}`
+    && apiCalls[0].method === 'PUT'
+    && JSON.parse(apiCalls[0].body).css === '[data-field="Код"] { color: red; }',
     JSON.stringify(apiCalls));
   ok('після збереження кнопка не «брудні»',
     !sandbox.elements.saveDeckStyleButton.classList.contains('is-dirty'), '');
 
   console.log('\nБібліотека стилів: переживає перезавантаження');
-  // Активний стиль — джерело істини для CSS. Якби ми читали лише modelCss,
-  // правка стилю зникла б після перезавантаження, а список показував би
-  // стару версію.
   const reloaded = sandbox.migrateDeck(JSON.parse(JSON.stringify(styleDeck)));
-  check('CSS після перезавантаження взято з активного стилю',
+  check('CSS після перезавантаження лишається знімком стилю',
     reloaded.modelCss, '[data-field="Код"] { color: red; }');
-  check('стилі пережили перезавантаження', sandbox.styleLibrary(reloaded).length, 1);
-  check('активний стиль той самий', reloaded.styles.activeId, mainId);
+  check('посилання на стиль пережило перезавантаження', reloaded.styleId, mainId);
   const orphans = sandbox.migrateDeck({
     id: '88888888-8888-4888-8888-888888888888', title: 'стара', cards: [],
     modelCss: '.card { color: #00ff00; }'
   });
-  check('стара колода без бібліотеки отримує стиль', sandbox.styleLibrary(orphans).length, 1);
+  check('стара колода без бібліотеки отримує спадковий стиль', orphans.styles.items.length, 1);
   check('CSS старої колоди не змінився', orphans.modelCss, '.card { color: #00ff00; }');
-  check('стара колода має активний стиль', orphans.styles.activeId,
-    sandbox.styleLibrary(orphans)[0].id);
 
   console.log('\nНезбережений стиль не губиться при перемиканні карток');
+  sandbox.appState.decks = [styleDeck];
+  sandbox.appState.editorDeckId = STYLE;
   sandbox.elements.editorModelCss.value = '.card { color: #00ff00; }';
   sandbox.markDeckStyleDirty();
   sandbox.renderEditor();
@@ -667,6 +773,7 @@ sandbox.appState.decks = [
     JSON.stringify(toasts.slice(-1)));
 
 }
+
 // .then, а не await: у файлі є require, і Node не дає поєднати його
 // з top-level await — довелося б або додавати "type": "module", або
 // переписувати все на import, а решта тестів лишається на require.
@@ -675,15 +782,13 @@ sandbox.appState.decks = [
 // мала б непомітно перемикати стиль тої, у якій користувач працює.
 async function generationStyleScenarios() {
   sandbox.apiRequestJson = recordApi;
-  const deck = sandbox.migrateDeck({
-    id: U, title: 'університет', fieldNames: ['Питання'],
-    modelCss: '.card { color: #111; }', cards: []
-  });
-  const other = sandbox.migrateDeck({
-    id: MATH, title: 'математика', fieldNames: ['Питання'],
-    modelCss: '.card { color: #222; }', cards: []
-  });
-  sandbox.appState.decks = [deck, other];
+  sandbox.appState.styleLibrary = [
+    { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', name: 'Світлий', css: '.card { color: #111; }', updatedAt: 1 },
+    { id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', name: 'Темний', css: '.card { color: #222; }', updatedAt: 2 }
+  ];
+  sandbox.appState.decks = [sandbox.migrateDeck({
+    id: U, title: 'університет', fieldNames: ['Питання'], cards: []
+  })];
   sandbox.renderDecks();
   const list = sandbox.elements.generationStyleList;
   const label = sandbox.elements.generationStyleLabel;
@@ -694,10 +799,8 @@ async function generationStyleScenarios() {
     list.innerHTML.slice(0, 200));
   ok('підпис пояснює, що робить авто',
     label.textContent.includes('стиль підбере Gemini'), label.textContent);
-  check('стилі згруповані за колодами',
-    (list.innerHTML.match(/style-option-group"/g) || []).length, 2);
-  ok('друга колода підписана', list.innerHTML.includes('математика'),
-    list.innerHTML.slice(0, 400));
+  check('стилі не групуються за колодами',
+    (list.innerHTML.match(/style-option-group"/g) || []).length, 0);
   check('кожен варіант має роль option',
     (list.innerHTML.match(/role="option"/g) || []).length, 3);
   check('кожен варіант має гапку для обраного',
@@ -705,25 +808,24 @@ async function generationStyleScenarios() {
 
   // Стиль без CSS не показуємо: Gemini все одно нічого не отримає, а в
   // переліку порожній пункт виглядає як помилка, а не як «ще не задано».
-  const blank = { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', name: 'Порожній', css: '' };
-  other.styles.items.push(blank);
+  sandbox.appState.styleLibrary.push({
+    id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', name: 'Порожній', css: '', updatedAt: 3
+  });
   sandbox.renderDecks();
   ok('стиль без CSS не потрапляє у список',
     !list.innerHTML.includes('Порожній'), list.innerHTML.slice(0, 400));
   check('лишились тільки два варіанти з id',
     (list.innerHTML.match(/data-generation-style="[0-9a-f-]{36}"/g) || []).length, 2);
-  other.styles.items = other.styles.items.filter(item => item.id !== blank.id);
+  sandbox.appState.styleLibrary = sandbox.appState.styleLibrary.filter(style => style.css);
 
-  const styleId = sandbox.styleLibrary(deck)[0].id;
+  const styleId = sandbox.appState.styleLibrary[0].id;
   check('стиль обрано', sandbox.setGenerationStyleId(styleId), styleId);
   check('вибір збережено', sandbox.appState.generationStyleId, styleId);
-  check('повернувся саме обраний CSS', sandbox.generationStyle().style.css, '.card { color: #111; }');
-  check('обраний стиль належить своїй колоді', sandbox.generationStyle().deck.id, U);
+  check('повернувся саме обраний CSS', sandbox.generationStyle().css, '.card { color: #111; }');
   ok('обраний варіант позначено для скринрідера',
     list.innerHTML.includes('aria-selected="true"'), list.innerHTML.slice(0, 400));
-  ok('у підписі є і колода, і стиль',
-    label.textContent.includes('університет') && label.textContent.includes('Основний'),
-    label.textContent);
+  ok('у підписі є назва спільного стилю',
+    label.textContent.includes('Світлий'), label.textContent);
   ok('обране збережено в localStorage',
     Object.values(sandbox.localStorage._data).some(v => String(v).includes(styleId)),
     JSON.stringify(sandbox.localStorage._data));
@@ -737,12 +839,6 @@ async function generationStyleScenarios() {
     sandbox.styleColorSwatches('.card { font-size: 1em; }').includes('без кольорів'),
     sandbox.styleColorSwatches('.card { font-size: 1em; }'));
 
-  // Активний стиль колоди не впирається на вибір для генерації: це два
-  // незалежні екрани, інакше довелося б двічі зберігати й розходитися
-  // при першій же правці.
-  check('активний стиль колоди той самий', deck.styles.activeId, styleId);
-  check('CSS колоди не змінився', deck.modelCss, '.card { color: #111; }');
-
   check('вибір чужого/неіснуючого id скидається',
     sandbox.setGenerationStyleId('99999999-9999-4999-8999-999999999999'), '');
   check('після чужого номера не лишається хвоста', sandbox.appState.generationStyleId, '');
@@ -750,17 +846,16 @@ async function generationStyleScenarios() {
   // Стиль видалили, а вибір про нього пам'ятає: показуємо «Авто»,
   // щоб у генерацію не пішов невидимий стиль.
   sandbox.setGenerationStyleId(styleId);
-  deck.styles.items = deck.styles.items.filter(item => item.id !== styleId);
+  sandbox.appState.styleLibrary = sandbox.appState.styleLibrary.filter(style => style.id !== styleId);
   sandbox.renderDecks();
   check('вибір скинуто після видалення', sandbox.appState.generationStyleId, '');
   ok('підпис повернувся до авто', label.textContent.includes('Авто'), label.textContent);
   check('обраним лишився тільки авто',
     (list.innerHTML.match(/aria-selected="true"/g) || []).length, 1);
 
-  // Стилі з різних колод не плутаються: генерація йде з тієї, що обрали.
-  const mathStyle = sandbox.styleLibrary(other)[0].id;
-  check('перемикання між колодами працює', sandbox.setGenerationStyleId(mathStyle), mathStyle);
-  check('його CSS з іншої колоди', sandbox.generationStyle().deck.id, MATH);
+  const otherId = sandbox.appState.styleLibrary[0].id;
+  check('перемикання між стилями працює', sandbox.setGenerationStyleId(otherId), otherId);
+  check('його CSS повертається', sandbox.generationStyle().css, '.card { color: #222; }');
 }
 
 // Власне меню замість нативного select: стан, фокус і клавіатура.

@@ -17,12 +17,33 @@ BEGIN;
 DROP TABLE IF EXISTS public.notes CASCADE;
 DROP TABLE IF EXISTS public.cards CASCADE;
 DROP TABLE IF EXISTS public.decks CASCADE;
+DROP TABLE IF EXISTS public.styles CASCADE;
+
+-- ---------------------------------------------------------------- styles
+-- Бібліотека стилів на рівні акаунта. Стиль не належить колоді: одну
+-- тему можна застосувати до будь-якої колоди й обрати для генерації.
+CREATE TABLE public.styles (
+    id         uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id    uuid        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    name       text        NOT NULL DEFAULT 'Стиль',
+    css        text        NOT NULL DEFAULT '',
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX styles_user_name_idx
+    ON public.styles (user_id, lower(name));
+CREATE INDEX styles_user_updated_idx
+    ON public.styles (user_id, updated_at DESC);
 
 -- ---------------------------------------------------------------- decks
 CREATE TABLE public.decks (
     id            uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id       uuid        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
     parent_id     uuid        REFERENCES public.decks(id) ON DELETE CASCADE,
+    -- Активний стиль колоди. NULL — стиль не вибрано; css нижче лишається
+    -- знімком, щоб .apkg не залежав від наявності рядка в бібліотеці.
+    style_id      uuid        REFERENCES public.styles(id) ON DELETE SET NULL,
 
     title         text        NOT NULL DEFAULT 'Моя колода',
     state         text        NOT NULL DEFAULT 'draft'
@@ -57,6 +78,7 @@ CREATE TABLE public.decks (
 CREATE INDEX decks_user_id_idx  ON public.decks (user_id);
 CREATE INDEX decks_parent_id_idx ON public.decks (parent_id);
 CREATE INDEX decks_state_idx     ON public.decks (user_id, state);
+CREATE INDEX decks_style_id_idx  ON public.decks (style_id);
 
 -- Один користувач не має двох колод з однаковим заголовком усередині однієї
 -- батьківської гілки. Без user_id індекс був би наскрізним: COALESCE(parent_id,
@@ -156,6 +178,8 @@ CREATE TRIGGER decks_touch BEFORE UPDATE ON public.decks
     FOR EACH ROW EXECUTE FUNCTION public.touch_updated_at();
 CREATE TRIGGER notes_touch BEFORE UPDATE ON public.notes
     FOR EACH ROW EXECUTE FUNCTION public.touch_updated_at();
+CREATE TRIGGER styles_touch BEFORE UPDATE ON public.styles
+    FOR EACH ROW EXECUTE FUNCTION public.touch_updated_at();
 
 -- ---------------------------------------------------------------- RLS
 -- anon не має жодних прав: бот ходить у базу через service_role, тому
@@ -163,13 +187,21 @@ CREATE TRIGGER notes_touch BEFORE UPDATE ON public.notes
 
 REVOKE ALL ON public.decks FROM anon;
 REVOKE ALL ON public.notes FROM anon;
+REVOKE ALL ON public.styles FROM anon;
 REVOKE ALL ON public.decks FROM authenticated;
 REVOKE ALL ON public.notes FROM authenticated;
+REVOKE ALL ON public.styles FROM authenticated;
 
 ALTER TABLE public.decks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.notes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.styles ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY decks_own ON public.decks
+    FOR ALL
+    USING      (auth.uid() = user_id)
+    WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY styles_own ON public.styles
     FOR ALL
     USING      (auth.uid() = user_id)
     WITH CHECK (auth.uid() = user_id);

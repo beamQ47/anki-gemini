@@ -343,9 +343,13 @@ check_that("кнопка «Зберегти стиль»", 'id="saveDeckStyleBut
 check_that("стиль колоди — не лише побічний ефект картки",
            "async function saveDeckStyle(" in decks_js)
 check_that("стиль їде на сервер окремим запитом",
-           "async function saveDeckStyleToServer(" in decks_js)
-check_that("збереження картки теж доїжджає зі стилем",
-           "await saveDeckStyleToServer();" in decks_js)
+           "async function persistStyleToServer(" in decks_js)
+# Стилі живуть в акаунті, а не в колоді: збереження картки не має
+# переписувати спільний стиль незбереженими правками textarea.
+_save_card_body = decks_js.split("async function saveEditorCard(", 1)[1].split(
+    "function isDeckStyleDirty(", 1)[0]
+check_that("збереження картки не переписує стиль",
+           "persistStyleToServer" not in _save_card_body)
 check_that("textarea стилю не перезаписується під час набору",
            "dataset.deckId" in decks_js)
 check_that("стиль колоди не губиться при перемиканні карток",
@@ -364,11 +368,12 @@ check_that("окреме вікно стилів у розмітці", 'id="styl
            and 'id="styleList"' in html and 'id="newStyleName"' in html)
 check_that("кнопка відкриває вікно стилів", 'id="openStylesButton"' in html
            and "elements.openStylesButton.addEventListener('click', openStyleModal)" in app_js)
-check_that("перейменування стилю окремо від застосування",
-           "function commitStyleRename(" in decks_js
+check_that("редагування стилю окремо від застосування",
+           "function selectStyleForEditing(" in decks_js
+           and "async function saveStyleEditor(" in decks_js
            and "function applyDeckStyle(" in decks_js)
-check_that("стиль не перезаписується з бібліотеки навпаки",
-           "const active = styles.items.find(item => item.id === styles.activeId) || styles.items[0];"
+check_that("бібліотека — джерело істини для CSS колоди",
+           "const cssValue = activeStyle ? activeStyle.css : (deck.modelCss || '');"
            in decks_js)
 check_that("стан змін стилю в CSS", "#saveDeckStyleButton.is-dirty" in style_css)
 check_that("стилі рядків бібліотеки в CSS", ".style-item" in style_css

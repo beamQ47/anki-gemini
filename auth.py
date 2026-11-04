@@ -23,6 +23,7 @@ user_id береться ТІЛЬКИ з відповіді Supabase. Нікол
 лишається дійсним до свого exp, з кешем чи без.
 """
 
+import asyncio
 import hashlib
 import os
 import time
@@ -54,6 +55,35 @@ def _anon_key() -> str:
 
 
 _cache: dict[str, tuple[str, float]] = {}
+_http_client: httpx.AsyncClient | None = None
+_client_loop: asyncio.AbstractEventLoop | None = None
+
+
+def _get_http_client() -> httpx.AsyncClient:
+    global _http_client, _client_loop
+    try:
+        current_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        current_loop = None
+
+    if _http_client is not None and (_http_client.is_closed or _client_loop is not current_loop):
+        _http_client = None
+
+    if _http_client is None:
+        _http_client = httpx.AsyncClient(
+            timeout=10.0,
+            limits=httpx.Limits(max_keepalive_connections=20, max_connections=50),
+        )
+        _client_loop = current_loop
+    return _http_client
+
+
+async def close_http_client():
+    global _http_client, _client_loop
+    if _http_client is not None and not _http_client.is_closed:
+        await _http_client.aclose()
+        _http_client = None
+        _client_loop = None
 
 
 def _extract_bearer(authorization: str | None) -> str:
@@ -77,11 +107,11 @@ async def fetch_user(token: str) -> dict | None:
         raise AuthError("Сервер не налаштований: немає SUPABASE_URL або SUPABASE_ANON_KEY")
 
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(
-                f"{url}/auth/v1/user",
-                headers={"apikey": key, "Authorization": f"Bearer {token}"},
-            )
+        client = _get_http_client()
+        response = await client.get(
+            f"{url}/auth/v1/user",
+            headers={"apikey": key, "Authorization": f"Bearer {token}"},
+        )
     except httpx.HTTPError as exc:
         # Supabase недоступний — це не вина клієнта, і 401 тут
         # змусив би його викинути сесію через тимчасовий збій.

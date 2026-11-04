@@ -5,6 +5,8 @@ import re
 import os
 import random
 import tempfile
+import time
+from datetime import datetime
 import asyncio
 import uvicorn
 from contextlib import asynccontextmanager
@@ -28,7 +30,7 @@ from anki_ids import (
     normalize_uuid,
     note_guid,
 )
-from auth import current_user_id, supabase_url
+from auth import current_user_id, supabase_url, close_http_client
 
 load_dotenv()
 
@@ -37,13 +39,21 @@ load_dotenv()
 async def lifespan(_: FastAPI):
     yield
     await database.close_pool()
+    await close_http_client()
 
 
 app = FastAPI(lifespan=lifespan)
 
+CORS_ORIGINS_RAW = os.getenv(
+    "CORS_ORIGINS",
+    "http://localhost:8000,http://127.0.0.1:8000,http://localhost:3000,http://127.0.0.1:3000,https://beamq47.github.io,https://anki-gemini-api.onrender.com",
+)
+CORS_ORIGINS = [o.strip() for o in CORS_ORIGINS_RAW.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=CORS_ORIGINS,
+    allow_origin_regex=r"^(https?://(localhost|127\.0\.0\.1)(:\d+)?|https://[a-zA-Z0-9-]+\.github\.io)$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -63,10 +73,11 @@ client = genai.Client(api_key=API_KEY) if API_KEY else None
 # Порядок має сенс: спершу найшвидші, бо для конспекту швидкість важливіша за
 # глибину; 3.5-flash останній, бо він розумніший, але повільніший у рази.
 DEFAULT_MODEL_CHAIN = ",".join([
-    "gemini-3.7-flash",
-    "gemini-3.1-flash-lite",
-    "gemini-3.5-flash",
     "gemini-3.5-flash-lite",
+    "gemini-flash-lite-latest",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-3.1-flash-lite",
 ])
 MODEL_CHAIN = [
     name.strip()
@@ -74,9 +85,9 @@ MODEL_CHAIN = [
     if name.strip()
 ]
 if not MODEL_CHAIN:
-    MODEL_CHAIN = ["gemini-3.5-flash"]
+    MODEL_CHAIN = ["gemini-3.5-flash-lite"]
 # Скільки разів пробувати ту саму модель, перш ніж іти до наступної.
-ATTEMPTS_PER_MODEL = max(1, int(os.getenv("GEMINI_ATTEMPTS_PER_MODEL", "2")))
+ATTEMPTS_PER_MODEL = max(1, int(os.getenv("GEMINI_ATTEMPTS_PER_MODEL", "1")))
 # 0 вимикає «внутрішні думки» моделі. На безкоштовному ліміті вони з'їдають
 # токени, за які можна було б зробити ще кілька запитів, а на простих
 # конспектах не дають нічого. Збільшити через GEMINI_THINKING_BUDGET.
@@ -84,6 +95,36 @@ THINKING_BUDGET = int(os.getenv("GEMINI_THINKING_BUDGET", "0"))
 # GEMINI_THINKING=off зовсім не передає налаштування думок: потрібно рідко,
 # але якщо конкретна модель його не приймає — порятує без правки коду.
 THINKING_ENABLED = os.getenv("GEMINI_THINKING", "on") != "off"
+
+# --- МОНІТОР ПРОЦЕСІВ ТА СТАНУ МОДЕЛЕЙ ---
+_process_monitor = {
+    "status": "idle",  # "idle", "searching", "generating", "completed", "error"
+    "active_model": None,
+    "model_chain": MODEL_CHAIN,
+    "step_description": "Система готова до роботи",
+    "last_model": None,
+    "last_latency_ms": 0,
+    "events": [
+        {
+            "time": datetime.now().strftime("%H:%M:%S"),
+            "text": "Монітор процесів активовано. Черга fallback готова.",
+            "level": "info",
+            "model": None,
+        }
+    ],
+}
+
+
+def log_process_event(text: str, level: str = "info", model: str | None = None):
+    event = {
+        "time": datetime.now().strftime("%H:%M:%S"),
+        "text": text,
+        "level": level,
+        "model": model,
+    }
+    _process_monitor["events"].insert(0, event)
+    if len(_process_monitor["events"]) > 50:
+        _process_monitor["events"].pop()
 
 # --- ФАЙЛИ, ЯКІ ВМІЄ ЧИТАТИ МОДЕЛЬ ---
 #
@@ -234,6 +275,15 @@ class DeckSaveRequest(BaseModel):
     # styles — бібліотека, з якої його обирають.
     styles: dict = {}
     parent_id: str | None = None
+    # Активний стиль із бібліотеки акаунта. None очищає посилання; поле,
+    # якого немає в запиті, лишає стиль як був (див. db.update_deck).
+    style_id: str | None = None
+
+
+class StyleSaveRequest(BaseModel):
+    id: str
+    name: str = "Стиль"
+    css: str = ""
 
 
 class DeckMoveRequest(BaseModel):
@@ -798,16 +848,30 @@ async def ask_ai(prompt_text: str, history_list: list, file_bytes: bytes | None,
     Те саме стосується конспектів у режимах 1 і 2: формули там — теж у \\( ... \\), інакше вони не намалюються в застосунку.
     Там, де формул немає, пиши звичайний текст без LaTeX."""
 }
-    if THINKING_ENABLED:
-        config_kwargs["thinking_config"] = genai.types.ThinkingConfig(
-            thinking_budget=THINKING_BUDGET
-        )
-    config = genai.types.GenerateContentConfig(**config_kwargs)
+    def _make_config(model_name: str) -> genai.types.GenerateContentConfig:
+        kwargs = dict(config_kwargs)
+        # Lite-моделі (gemini-3.5-flash-lite, flash-lite-latest тощо) не мають режиму
+        # «думок» і повертають 400 INVALID_ARGUMENT, якщо передати thinking_budget=0.
+        # Для них thinking_config не потрібен (вони й так максимально швидкі).
+        if THINKING_ENABLED and ("lite" not in model_name.lower() or THINKING_BUDGET > 0):
+            kwargs["thinking_config"] = genai.types.ThinkingConfig(
+                thinking_budget=THINKING_BUDGET
+            )
+        return genai.types.GenerateContentConfig(**kwargs)
+
+    start_time = time.time()
+    _process_monitor["status"] = "searching"
+    _process_monitor["step_description"] = "Пошук вільної моделі в ланцюжку..."
+    log_process_event(f"Початок обробки: черга з {len(MODEL_CHAIN)} моделей", level="info")
 
     quota_error = None
     last_failure = None
     for model in MODEL_CHAIN:
+        _process_monitor["active_model"] = model
+        config = _make_config(model)
         for attempt in range(ATTEMPTS_PER_MODEL):
+            _process_monitor["step_description"] = f"Запит до {model} (спроба {attempt + 1}/{ATTEMPTS_PER_MODEL})..."
+            log_process_event(f"Запит до {model} (спроба {attempt + 1}/{ATTEMPTS_PER_MODEL})...", level="searching", model=model)
             try:
                 response = await client.aio.models.generate_content(
                     model=model,
@@ -816,22 +880,28 @@ async def ask_ai(prompt_text: str, history_list: list, file_bytes: bytes | None,
                 )
                 text = response.text
                 if text and text.strip():
+                    elapsed = round((time.time() - start_time) * 1000)
+                    _process_monitor["status"] = "completed"
+                    _process_monitor["last_model"] = model
+                    _process_monitor["last_latency_ms"] = elapsed
+                    _process_monitor["step_description"] = f"Відповідь отримано від {model} за {elapsed} мс"
+                    log_process_event(f"Модель {model} відповіла за {elapsed} мс", level="success", model=model)
                     return text
                 # Модель витратила токени на «думки» і не віддала тексту.
                 # Користувачеві така відповідь некорисна, тож це невдача,
                 # а не результат: йдемо до наступної моделі.
                 last_failure = f"{model} відповів без тексту"
+                log_process_event(f"{model}: відповідь без тексту, перехід далі...", level="warning", model=model)
                 print(f"[gemini] {model}: відповідь без тексту")
             except Exception as e:
                 err = str(e)
                 print(f"[gemini] {model} · спроба {attempt + 1}/{ATTEMPTS_PER_MODEL}: {err}")
                 kind = classify_gemini_error(e, err)
+                log_process_event(f"{model}: {kind} ({err[:50]})...", level="warning", model=model)
                 if kind in ("config", "auth", "not_found"):
+                    _process_monitor["status"] = "error"
                     return f"Помилка Gemini API: {err}"
                 if kind == "quota":
-                    # Безкоштовний ліміт. На тій самій моделі повторювати
-                    # марно, але квота в кожної моделі своя, тож наступну
-                    # все одно пробуємо.
                     quota_error = err
                     break
                 last_failure = err
@@ -840,6 +910,10 @@ async def ask_ai(prompt_text: str, history_list: list, file_bytes: bytes | None,
                 # вікно перевантаження. Зростання часу + дрібний розкид,
                 # щоб паралельні запити не синхронізувалися.
                 await asyncio.sleep(1.5 * (2 ** attempt) + random.uniform(0, 0.7))
+
+    _process_monitor["status"] = "error"
+    _process_monitor["step_description"] = "Всі моделі в ланцюжку повернули помилку"
+    log_process_event("Не вдалося отримати відповідь від жодної моделі в ланцюжку", level="error")
 
     if quota_error:
         return (
@@ -856,8 +930,23 @@ async def ask_ai(prompt_text: str, history_list: list, file_bytes: bytes | None,
 # --- ENDPOINTS ---
 
 @app.get("/api/health")
+@app.get("/health", include_in_schema=False)
 def health():
     return {"status": "ok", "message": "Anki Gemini API is running"}
+
+
+@app.get("/api/system/process-status")
+def process_status():
+    """Поточний стан процесів та ланцюжка моделей для випадаючого монітора."""
+    return {
+        "status": _process_monitor["status"],
+        "active_model": _process_monitor["active_model"],
+        "model_chain": MODEL_CHAIN,
+        "step_description": _process_monitor["step_description"],
+        "last_model": _process_monitor["last_model"],
+        "last_latency_ms": _process_monitor["last_latency_ms"],
+        "events": _process_monitor["events"][:30],
+    }
 
 
 @app.get("/api/config")
@@ -1034,6 +1123,41 @@ async def list_decks(user_id: str = Depends(current_user_id)):
     return {"decks": await database.list_decks(user_id)}
 
 
+# --- БІБЛІОТЕКА СТИЛІВ АКАУНТА ---
+#
+# Стиль не належить колоді: одну тему можна застосувати до будь-якої
+# колоди й обрати для генерації. POST — upsert, як і в колодах: фронтенд
+# не мусить знати, чи рядок уже на сервері.
+
+@app.get("/api/styles")
+async def list_styles(user_id: str = Depends(current_user_id)):
+    return {"styles": await database.list_styles(user_id)}
+
+
+@app.post("/api/styles", status_code=201)
+async def save_style(req: StyleSaveRequest, user_id: str = Depends(current_user_id)):
+    style = await database.create_style(user_id, req.id, req.name, req.css)
+    if not style:
+        raise HTTPException(status_code=403, detail="Не вдалося зберегти стиль")
+    return style
+
+
+@app.put("/api/styles/{style_id}")
+async def edit_style(style_id: str, req: StyleSaveRequest,
+                     user_id: str = Depends(current_user_id)):
+    style = await database.update_style(user_id, style_id, req.name, req.css)
+    if not style:
+        raise HTTPException(status_code=404, detail="Стиль не знайдено")
+    return style
+
+
+@app.delete("/api/styles/{style_id}")
+async def remove_style(style_id: str, user_id: str = Depends(current_user_id)):
+    if not await database.delete_style(user_id, style_id):
+        raise HTTPException(status_code=404, detail="Стиль не знайдено")
+    return {"deleted": True}
+
+
 @app.get("/api/decks/{deck_id}")
 async def get_deck(deck_id: str, user_id: str = Depends(current_user_id)):
     deck = await database.get_deck(user_id, deck_id)
@@ -1048,7 +1172,7 @@ async def get_deck(deck_id: str, user_id: str = Depends(current_user_id)):
 async def save_deck(req: DeckSaveRequest, user_id: str = Depends(current_user_id)):
     deck = await database.create_deck(
         user_id, req.id, req.title, req.field_names, req.css, req.templates, req.parent_id,
-        styles=req.styles,
+        styles=req.styles, style_id=req.style_id,
     )
     if not deck:
         raise HTTPException(status_code=403, detail="Не вдалося зберегти колоду")
@@ -1057,9 +1181,12 @@ async def save_deck(req: DeckSaveRequest, user_id: str = Depends(current_user_id
 
 @app.put("/api/decks/{deck_id}")
 async def edit_deck(deck_id: str, req: DeckSaveRequest, user_id: str = Depends(current_user_id)):
+    # Поле, якого немає в запиті, не має очищати вже вибраний стиль —
+    # тому відсутність відрізняємо від явного null.
+    style_id = req.style_id if "style_id" in req.model_fields_set else database.UNSET
     deck = await database.update_deck(
         user_id, deck_id, req.title, req.field_names, req.css, req.templates, req.parent_id,
-        styles=req.styles,
+        styles=req.styles, style_id=style_id,
     )
     if not deck:
         raise HTTPException(status_code=404, detail="Колоду не знайдено")
