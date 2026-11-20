@@ -100,15 +100,16 @@ THINKING_ENABLED = os.getenv("GEMINI_THINKING", "on") != "off"
 # --- МОНІТОР ПРОЦЕСІВ ТА СТАНУ МОДЕЛЕЙ ---
 _process_monitor = {
     "status": "idle",  # "idle", "searching", "generating", "completed", "error"
-    "active_model": None,
+    "active_model": MODEL_CHAIN[0] if MODEL_CHAIN else "gemini-4-hydrogen",
     "model_chain": MODEL_CHAIN,
     "step_description": "Система готова до роботи",
-    "last_model": None,
+    "last_model": MODEL_CHAIN[0] if MODEL_CHAIN else "gemini-4-hydrogen",
     "last_latency_ms": 0,
     "events": [
         {
+            "timestamp": int(time.time() * 1000),
             "time": datetime.now().strftime("%H:%M:%S"),
-            "text": "Монітор процесів активовано. Черга fallback готова.",
+            "text": "Монітор процесів активовано. Черга моделей готова.",
             "level": "info",
             "model": None,
         }
@@ -117,7 +118,9 @@ _process_monitor = {
 
 
 def log_process_event(text: str, level: str = "info", model: str | None = None):
+    now_ms = int(time.time() * 1000)
     event = {
+        "timestamp": now_ms,
         "time": datetime.now().strftime("%H:%M:%S"),
         "text": text,
         "level": level,

@@ -137,6 +137,7 @@ const elements = {
   processCurrentStatusText: document.getElementById('processCurrentStatusText'),
   processCurrentDetailsText: document.getElementById('processCurrentDetailsText'),
   processModelChainList: document.getElementById('processModelChainList'),
+  processModelChainCount: document.getElementById('processModelChainCount'),
   processEventLog: document.getElementById('processEventLog'),
   clearProcessLogButton: document.getElementById('clearProcessLogButton'),
   processLastLatency: document.getElementById('processLastLatency'),
@@ -451,23 +452,34 @@ async function sendToBackend(type, payload = {}) {
 }
 
 // --- МОНІТОР ПРОЦЕСІВ ТА СТАНУ МОДЕЛЕЙ ШІ ---
+function getModelTag(name, idx, total) {
+  if (idx === 0) return 'Основна';
+  if (idx === total - 1) return 'Фулбек';
+  if (name.includes('hydrogen')) return 'Hydrogen';
+  if (name.includes('3.8-flash')) return 'Розумна';
+  if (name.includes('flash-lite')) return 'Швидка';
+  return `Резерв ${idx}`;
+}
+
 const processState = {
   isOpen: false,
   status: 'idle',
-  activeModel: 'gemini-3.5-flash-lite',
+  activeModel: 'gemini-4-hydrogen',
   stepDescription: 'Система готова до роботи',
-  lastModel: 'gemini-3.5-flash-lite',
+  lastModel: 'gemini-4-hydrogen',
   lastLatencyMs: 1490,
   step: 0,
   modelChain: [
-    { name: 'gemini-3.5-flash-lite', tag: 'Швидка' },
-    { name: 'gemini-flash-lite-latest', tag: 'Резерв 1' },
+    { name: 'gemini-4-hydrogen', tag: 'Основна' },
+    { name: 'gemini-3.8-flash', tag: 'Розумна' },
     { name: 'gemini-3.6-flash', tag: 'Резерв 2' },
-    { name: 'gemini-3.5-flash', tag: 'Розумна' },
+    { name: 'gemini-flash-lite-latest', tag: 'Швидка' },
+    { name: 'gemini-3.5-flash-lite', tag: 'Резерв 4' },
     { name: 'gemini-3.1-flash-lite', tag: 'Фулбек' }
   ],
   events: [
     {
+      timestamp: Date.now(),
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
       text: 'Монітор процесів активовано. Черга моделей готова.',
       level: 'info'
@@ -571,8 +583,11 @@ function renderProcessDrawer() {
     else elements.processHeaderPing.classList.add('hidden');
   }
 
+  if (elements.processModelChainCount) {
+    elements.processModelChainCount.textContent = `черга 1 → ${processState.modelChain.length}`;
+  }
   if (elements.processActiveModelBadge) {
-    elements.processActiveModelBadge.textContent = processState.activeModel || processState.lastModel || 'gemini-3.5-flash-lite';
+    elements.processActiveModelBadge.textContent = processState.activeModel || processState.lastModel || 'gemini-4-hydrogen';
   }
   if (elements.processCurrentStatusText) {
     elements.processCurrentStatusText.textContent = processState.stepDescription || 'Очікування запиту';
@@ -619,7 +634,10 @@ function renderProcessDrawer() {
       else if (ev.level === 'warning') { colorClass = 'text-amber-400'; icon = '▲'; }
       else if (ev.level === 'error') { colorClass = 'text-red-400 font-semibold'; icon = '✕'; }
       else if (ev.level === 'searching') { colorClass = 'text-violet-400'; icon = '🔍'; }
-      return `<div class="flex items-start gap-1.5 leading-snug"><span class="text-app-hint opacity-70 shrink-0">[${ev.time}]</span><span class="${colorClass}">${icon} ${escapeHtml(ev.text)}</span></div>`;
+      const displayTime = ev.timestamp
+        ? new Date(ev.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+        : (ev.time || '--:--:--');
+      return `<div class="flex items-start gap-1.5 leading-snug"><span class="text-app-hint opacity-70 shrink-0">[${displayTime}]</span><span class="${colorClass}">${icon} ${escapeHtml(ev.text)}</span></div>`;
     }).join('');
   }
 
@@ -633,10 +651,15 @@ function renderProcessDrawer() {
   }
 }
 
-function addProcessEvent(text, level = 'info', model = null) {
-  const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  processState.events.unshift({ time, text, level, model });
-  if (processState.events.length > 50) processState.events.pop();
+function addProcessEvent(text, level = 'info', model = null, timestamp = null) {
+  const ts = typeof timestamp === 'number' ? timestamp : Date.now();
+  const time = new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const isDuplicate = processState.events.slice(0, 3).some(e => e.text === text && Math.abs((e.timestamp || 0) - ts) < 2000);
+  if (!isDuplicate) {
+    processState.events.unshift({ timestamp: ts, time, text, level, model });
+    processState.events.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+    if (processState.events.length > 50) processState.events.length = 50;
+  }
   if (processState.isOpen) renderProcessDrawer();
 }
 
@@ -669,14 +692,38 @@ async function fetchProcessStatus() {
     if (data.step_description) processState.stepDescription = data.step_description;
     if (data.last_model) processState.lastModel = data.last_model;
     if (data.last_latency_ms) processState.lastLatencyMs = data.last_latency_ms;
+    if (Array.isArray(data.model_chain) && data.model_chain.length) {
+      processState.modelChain = data.model_chain.map((name, idx) => ({
+        name,
+        tag: getModelTag(name, idx, data.model_chain.length)
+      }));
+    }
     if (Array.isArray(data.events) && data.events.length) {
-      for (const ev of data.events.slice().reverse()) {
-        const exists = processState.events.some(e => e.time === ev.time && e.text === ev.text);
+      let changed = false;
+      for (const ev of data.events) {
+        const evTs = typeof ev.timestamp === 'number' ? ev.timestamp : null;
+        const exists = processState.events.some(e => {
+          if (evTs && e.timestamp && Math.abs(e.timestamp - evTs) < 2000 && e.text === ev.text) return true;
+          return e.text === ev.text && (e.time === ev.time || (e.text.includes('Монітор процесів') && ev.text.includes('Монітор процесів')));
+        });
         if (!exists) {
-          processState.events.unshift(ev);
+          const displayTime = evTs
+            ? new Date(evTs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+            : (ev.time || '--:--:--');
+          processState.events.push({
+            timestamp: evTs || (Date.now() - 5000),
+            time: displayTime,
+            text: ev.text,
+            level: ev.level || 'info',
+            model: ev.model || null
+          });
+          changed = true;
         }
       }
-      if (processState.events.length > 50) processState.events.length = 50;
+      if (changed) {
+        processState.events.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+        if (processState.events.length > 50) processState.events.length = 50;
+      }
     }
     renderProcessDrawer();
   } catch (_) {}
