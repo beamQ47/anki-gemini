@@ -114,7 +114,10 @@ const DECK = {
   const f = scope('__faces(appState.decks[0].cards[0], ["Код","Назва","Приклад","Джерело"])');
   checkThat('лицьова — це лише перше поле в .anki-question',
     f.front === '<div class="anki-question anki-field-1" data-field="Код">200</div>', `отримано: ${f.front}`);
-  checkThat('на зворотному є #answer', f.back.includes('<hr id="answer">'), '');
+  checkThat('зворотна містить лише зворотні поля, без лицьової сторони',
+    !f.back.includes(f.front), `отримано: ${f.back.slice(0, 60)}`);
+  checkThat('зворотна не дублює лицьове питання',
+    !f.back.includes('anki-question'), '');
   checkThat('кожне інше поле — окремий блок з підписом',
     (f.back.match(/class="anki-field anki-field-/g) || []).length === 3,
     `блоків: ${(f.back.match(/class="anki-field anki-field-/g) || []).length}`);
@@ -122,8 +125,6 @@ const DECK = {
     f.back.includes('data-field="Назва"') && f.back.includes('data-field="Джерело"'), '');
   checkThat('значення полів на місці',
     f.back.includes('>OK<') && f.back.includes('>HTTP/1.1 200 OK<') && f.back.includes('>RFC 9110<'), '');
-  checkThat('зворотна містить і лицьову сторону ({{FrontSide}})',
-    f.back.startsWith(f.front), `отримано: ${f.back.slice(0, 60)}`);
 
   console.log('\nHTML екранується');
   const evil = { ...DECK, cards: [{ id: 'c3333333-3333-4333-8333-333333333333',

@@ -587,6 +587,9 @@ button > svg[data-lucide] {
 
 .flip-card {
   perspective: 1200px;
+  height: auto;
+  min-height: 85px;
+  max-height: 220px;
 }
 
 /*
@@ -598,6 +601,9 @@ button > svg[data-lucide] {
 .flip-card-inner {
   position: relative;
   display: grid;
+  height: 100%;
+  min-height: 85px;
+  max-height: 220px;
   transform-style: preserve-3d;
   transition: transform 650ms cubic-bezier(0.2, 0.7, 0.2, 1);
 }
@@ -612,16 +618,17 @@ button > svg[data-lucide] {
  * заввишки в екран — тому лишаємо межу і внутрішню прокрутку.
  * overscroll-behavior: contain не дає колесу тікати з картки в чат.
  *
- * Розміри навмисно скромні: картка живе в стрічці чату поряд із текстом
- * відповіді, і раніше вона з'їдала пів екрана. Менша картка — помітно
- * більше конспекту за один прогляд, а зменшені поля й шрифт роблять її
- * схожою на справжню анківську, а не на банер.
+ * Розміри компактні та адаптивні до тексту: коротке питання займає
+ * рівно стільки місця, скільки потрібно (~85-110px), а довгі тексти
+ * розширюються максимум до 220px із внутрішнім скролом.
  */
 .flip-face {
   position: relative;
   grid-area: 1 / 1;
   display: flex;
-  height: clamp(180px, 44vh, 380px);
+  height: auto;
+  min-height: 85px;
+  max-height: 220px;
   flex-direction: column;
   overflow: hidden;
   border: 1px solid var(--app-border);
@@ -629,7 +636,64 @@ button > svg[data-lucide] {
   backface-visibility: hidden;
   background: var(--app-secondary-bg);
   box-shadow: 0 6px 18px rgba(15, 23, 42, 0.07);
-  padding: 0.7rem;
+  padding: 0.65rem 0.75rem;
+}
+
+/*
+ * Захист геометрії картки в чаті від кастомного CSS (.card { min-height: 100vh; ... }):
+ * Будь-який кастомний CSS моделі або користувацький стиль не повинен розтягувати
+ * картку в чаті на весь екран або спотворювати вертикальну структуру фліп-картки.
+ */
+.flip-card,
+[class*="msg-cards-scope-"] .flip-card {
+  height: auto !important;
+  min-height: 85px !important;
+  max-height: 220px !important;
+}
+
+.flip-card-inner,
+[class*="msg-cards-scope-"] .flip-card-inner {
+  height: 100% !important;
+  min-height: 85px !important;
+  max-height: 220px !important;
+}
+
+.flip-card .flip-face,
+.flip-card .flip-face.card,
+[class*="msg-cards-scope-"] .flip-card .flip-face.card,
+[class*="msg-cards-scope-"] .flip-face.card {
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: flex-start !important;
+  align-items: stretch !important;
+  height: auto !important;
+  min-height: 85px !important;
+  max-height: 220px !important;
+  box-sizing: border-box !important;
+  margin: 0 !important;
+  padding: 0.65rem 0.75rem !important;
+}
+
+/*
+ * Захист від повноекранних pseudo-елементів (наприклад, .card::before { position: fixed; width: 100vw; height: 100vh; }):
+ * Не дозволяємо їм накривати екран або вилазити за межі картки у стрічці чату.
+ */
+[class*="msg-cards-scope-"] .flip-card .card::before,
+[class*="msg-cards-scope-"] .flip-card .card::after,
+[class*="msg-cards-scope-"] .flip-face::before,
+[class*="msg-cards-scope-"] .flip-face::after {
+  position: absolute !important;
+  inset: 0 !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  max-width: 100% !important;
+  max-height: 100% !important;
+  border-radius: inherit !important;
+  pointer-events: none !important;
 }
 
 .flip-face.front {
@@ -968,9 +1032,10 @@ button > svg[data-lucide] {
 }
 
 @media (max-width: 640px) {
+  .flip-card,
   .flip-card-inner,
   .flip-face {
-    min-height: 170px;
+    min-height: 85px;
   }
 }
 

@@ -730,7 +730,7 @@ def build_card_templates(field_names: list[str]) -> list[dict]:
     """
     head, tail = field_names[0], field_names[1:]
 
-    blocks = ["{{FrontSide}}", '<hr id="answer">']
+    blocks = []
     for offset, name in enumerate(tail, start=2):
         blocks.append(
             f"{{{{#{name}}}}}"
@@ -747,7 +747,7 @@ def build_card_templates(field_names: list[str]) -> list[dict]:
             f'<div class="anki-question anki-field-1"{_field_attributes(head)}>'
             f'{{{{{head}}}}}</div>'
         ),
-        "afmt": "".join(blocks),
+        "afmt": "".join(blocks) if blocks else f"{{{{{head}}}}}",
     }]
 
 def build_note_guid(note_uuid: str) -> str:
@@ -1038,7 +1038,7 @@ async def ask_ai(prompt_text: str, history_list: list, file_bytes: bytes | None,
         "fields": ["Поле1", "Поле2", "Поле3"],
         "css": "будь-який валідний CSS або порожній рядок",
         "templates": [
-        {"name": "Картка 1", "qfmt": "{{Поле1}}", "afmt": "{{FrontSide}}<hr id=\"answer\">{{Поле2}}"},
+        {"name": "Картка 1", "qfmt": "{{Поле1}}", "afmt": "{{Поле2}}"},
         {"name": "Картка 2", "qfmt": "{{Поле2}}", "afmt": "{{FrontSide}}<hr id=\"answer\">{{Поле1}}"}
         ]
     },

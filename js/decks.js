@@ -2618,8 +2618,9 @@ function buildPreviewFaces(card, fieldNames) {
       `<div class="anki-field-value">${escapeHtml(value)}</div>` +
       '</div>'
     ));
-  // На зворотному {{FrontSide}} — це вже відрендерена лицьова сторона.
-  const back = front + '<hr id="answer">' + blocks.join('');
+  // На зворотному показуємо лише зворотні поля (відповідь, пояснення тощо),
+  // без дублювання лицьової сторони.
+  const back = blocks.length ? blocks.join('') : front;
   return { front, back };
 }
 

@@ -1000,6 +1000,25 @@ elements.messages.addEventListener('click', event => {
     if (message?.cards?.length && typeof openMessageCardsPreview === 'function') {
       openMessageCardsPreview(message);
     }
+  } else if (button.dataset.action === 'toggle-extra-cards') {
+    const extraContainer = document.getElementById(`extraCards-${button.dataset.messageId}`);
+    if (extraContainer) {
+      const isHidden = extraContainer.classList.contains('hidden');
+      extraContainer.classList.toggle('hidden');
+      const icon = button.querySelector('i[data-lucide], svg[data-lucide]');
+      const label = button.querySelector('.toggle-extra-label');
+      if (isHidden) {
+        if (label) label.textContent = 'Згорнути додаткові картки';
+        if (icon) icon.style.transform = 'rotate(180deg)';
+        if (typeof typesetMath === 'function') typesetMath(extraContainer);
+        if (typeof refreshIcons === 'function') refreshIcons(extraContainer);
+      } else {
+        const count = extraContainer.querySelectorAll('.flip-card').length;
+        if (label) label.textContent = `Показати ще ${count} карток`;
+        if (icon) icon.style.transform = '';
+      }
+      if (typeof refreshIcons === 'function') refreshIcons(button);
+    }
   } else if (button.dataset.action === 'retry-chat') {
     retryChat();
   }

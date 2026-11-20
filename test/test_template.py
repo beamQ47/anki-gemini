@@ -23,10 +23,10 @@ print("build_card_templates")
 t = build_card_templates(FIELDS)[0]
 check("один шаблон", len(build_card_templates(FIELDS)), 1)
 check_that("на лицьовій лише перше поле", t["qfmt"].count("{{") == 1 and "{{Код}}" in t["qfmt"])
-check("на зворотному 4 поля + FrontSide", t["afmt"].count("anki-field-value"), 4)
+check("на зворотному 4 поля", t["afmt"].count("anki-field-value"), 4)
 check_that("кожне поле має підпис", t["afmt"].count("anki-field-name") == 4)
 check_that("підписи екрановані", "&" in t["afmt"] or "Поле" not in t["afmt"])
-check_that("роздільник відповіді", '<hr id="answer">' in t["afmt"])
+check_that("лицьова не дублюється на зворотному", "{{FrontSide}}" not in t["afmt"])
 check_that("пропущені поля імені не потрапляють у шаблон",
            all(f"{{{{{f}}}}}" in t["afmt"] for f in FIELDS[1:]))
 

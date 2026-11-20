@@ -205,6 +205,17 @@ checkThat('є контейнер полів', long.includes('card-fields'));
 checkThat('лише одна область прокрутки на зворотній стороні',
   (long.split('flip-face back')[1].match(/class="card-fields"/g) || []).length === 1);
 
+console.log('\nrenderCards: велика кількість карток (10 штук)');
+const many = sandbox.renderCards({
+  id: 'm4',
+  fieldNames: ['Питання', 'Відповідь'],
+  cards: Array.from({ length: 10 }, (_, i) => ({ values: { Питання: `П${i + 1}`, Відповідь: `В${i + 1}` } }))
+});
+checkThat('всього 10 flip-card', (many.match(/class="flip-card"/g) || []).length === 10);
+checkThat('наявний контейнер додаткових карток', many.includes('extra-cards-container'));
+checkThat('наявна кнопка розгортання', many.includes('data-action="toggle-extra-cards"'));
+checkThat('кнопка вказує точну кількість додаткових', many.includes('Показати ще 4 карток (всього 10)'));
+
 /*
  * Регресія: align-items:center на скрол-контейнері змушує Flexbox
  * центрувати вміст і при переповненні, тож верх стає недоступним для
@@ -232,15 +243,18 @@ checkThat('фейковий смужок прибрано', !css.includes('card-
  * шрифт лицьової сторони — не базовий, а компактний. */
 const flipFaceRule = (css.match(/\.flip-face\s*\{[^}]*\}/) || [''])[0];
 checkThat('flip-face: обмежена висота, не екран',
-  /height:\s*clamp\(/.test(flipFaceRule) && /380px/.test(flipFaceRule),
+  /max-height:\s*220px/.test(flipFaceRule) && /min-height:\s*85px/.test(flipFaceRule),
   `отримано: ${flipFaceRule.replace(/\s+/g, ' ')}`);
-checkThat('flip-face: щільніші поля', /padding:\s*0\.7rem/.test(flipFaceRule),
+checkThat('flip-face: щільніші поля', /padding:\s*0\.65rem\s+0\.75rem/.test(flipFaceRule),
   `отримано: ${flipFaceRule.replace(/\s+/g, ' ')}`);
 checkThat('лицьова сторона: компактний шрифт',
   cardHtml.includes('class="card-content text-sm font-extrabold leading-5"'),
   cardHtml.slice(cardHtml.indexOf('card-content'), cardHtml.indexOf('card-content') + 60));
 checkThat('мобільна мінімальна висота теж зменшена',
-  /max-width:\s*640px\)\s*\{[^}]*min-height:\s*170px/.test(css));
+  /max-width:\s*640px\)\s*\{[^}]*min-height:\s*85px/.test(css));
+checkThat('захист геометрії від кастомного CSS моделі',
+  /\[class\*="msg-cards-scope-"\][^{]*\{[^}]*max-height:\s*220px\s*!important/.test(css) &&
+  /\[class\*="msg-cards-scope-"\][^{]*\{[^}]*min-height:\s*85px\s*!important/.test(css));
 
 console.log('\ncanMergeCards');
 check('однакові', sandbox.canMergeCards(['A', 'B'], ['A', 'B']), true);
