@@ -384,29 +384,51 @@ async function readErrorDetail(response) {
 }
 
 async function apiFetch(path, options = {}) {
-  const { body, headers, ...rest } = options;
+  const { body, headers, retries = 2, retryDelayMs = 2000, ...rest } = options;
   const isFormData = typeof FormData !== 'undefined' && body instanceof FormData;
   const token = await getAccessToken();
-  const response = await fetch(getApiUrl(path), {
-    ...rest,
-    headers: {
-      Accept: isFormData ? '*/*' : 'application/json',
-      ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
-      ...(token ? { Authorization: 'Bearer ' + token } : {}),
-      ...(headers || {})
-    },
-    body
-  });
-  if (response.status === 401) {
-    window.AnkiAuth?.signOut();
+  const requestHeaders = {
+    Accept: isFormData ? '*/*' : 'application/json',
+    ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
+    ...(token ? { Authorization: 'Bearer ' + token } : {}),
+    ...(headers || {})
+  };
+
+  let attempt = 0;
+  while (true) {
+    try {
+      const response = await fetch(getApiUrl(path), {
+        ...rest,
+        headers: requestHeaders,
+        body
+      });
+      if (response.status === 401) {
+        window.AnkiAuth?.signOut();
+      }
+      if (!response.ok) {
+        // Якщо сервер повертає 502/503 (Render прокидається або перезапускається):
+        if ((response.status === 502 || response.status === 503) && attempt < retries) {
+          attempt++;
+          await new Promise(r => setTimeout(r, retryDelayMs * attempt));
+          continue;
+        }
+        const detail = await readErrorDetail(response);
+        const error = new Error(detail || `Request failed with status ${response.status}`);
+        error.status = response.status;
+        throw error;
+      }
+      return response;
+    } catch (err) {
+      // Мережевий обрив (Failed to fetch або Render router disconnect):
+      const isNetworkError = err && (err.name === 'TypeError' || /failed to fetch/i.test(err.message));
+      if (isNetworkError && attempt < retries) {
+        attempt++;
+        await new Promise(r => setTimeout(r, retryDelayMs * attempt));
+        continue;
+      }
+      throw err;
+    }
   }
-  if (!response.ok) {
-    const detail = await readErrorDetail(response);
-    const error = new Error(detail || `Request failed with status ${response.status}`);
-    error.status = response.status;
-    throw error;
-  }
-  return response;
 }
 
 async function apiRequestJson(path, options = {}) {

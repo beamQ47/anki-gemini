@@ -604,6 +604,7 @@ async function submitChat() {
   targetMessages.push(userMessage, loadingMessage);
   if (targetMessages.length > 60) targetMessages.splice(0, targetMessages.length - 60);
   elements.messageInput.value = '';
+  appState.lastAttemptedFile = file;
   appState.selectedFile = null;
   clearAttachment();
   updateMessageInput();
@@ -619,6 +620,7 @@ async function submitChat() {
   const processPollTimer = setInterval(() => window.ProcessMonitor?.fetchStatus(), 600);
   try {
     const response = await getAssistantReply(text || 'Проаналізуй прикріплений документ', file);
+    appState.lastAttemptedFile = null;
     clearInterval(processPollTimer);
     window.ProcessMonitor?.setStep(3);
     window.ProcessMonitor?.addEvent('Отримано відповідь від Gemini, валідація карток...', 'success');
@@ -674,6 +676,10 @@ function retryChat() {
   const kept = appState.messages.filter(message => message.type !== 'error');
   appState.messages.splice(0, appState.messages.length, ...kept);
   elements.messageInput.value = lastUserMessage.content;
+  if (appState.lastAttemptedFile) {
+    appState.selectedFile = appState.lastAttemptedFile;
+    showAttachment();
+  }
   updateMessageInput();
   renderMessages(true);
 }

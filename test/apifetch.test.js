@@ -152,8 +152,23 @@ const getAccessToken = sandbox.__getAccessToken;
   const savedFetch = sandbox.fetch;
   sandbox.fetch = async () => ({ ok: false, status: 401, json: async () => ({}) });
   let thrown = null;
-  try { await apiFetch('/api/decks'); } catch (e) { thrown = e; }
+  try { await apiFetch('/api/decks', { retries: 0 }); } catch (e) { thrown = e; }
   check('401 кидає помилку', thrown && thrown.status, 401);
+  sandbox.fetch = savedFetch;
+
+  console.log('\nМережевий збій (Failed to fetch) автоматично повторюється');
+  let networkAttempts = 0;
+  sandbox.fetch = async (url) => {
+    networkAttempts++;
+    if (networkAttempts === 1) {
+      const err = new TypeError('Failed to fetch');
+      throw err;
+    }
+    return { ok: true, status: 200, json: async () => ({ success: true }), text: async () => '' };
+  };
+  const retryRes = await apiFetch('/api/test-retry', { retries: 1, retryDelayMs: 10 });
+  check('відповідь успішна після повтору', retryRes.ok, true);
+  check('зроблено 2 спроби', networkAttempts, 2);
   sandbox.fetch = savedFetch;
 
   console.log(`\n${ok} passed, ${fail} failed`);
