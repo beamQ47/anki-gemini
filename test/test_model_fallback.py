@@ -99,7 +99,7 @@ print("Ланцюжок за замовчуванням")
 check("це список моделей", isinstance(main.MODEL_CHAIN, list), True)
 check("не порожній", len(main.MODEL_CHAIN) > 0, True)
 check("усі моделі названі рядками", all(isinstance(m, str) and m for m in main.MODEL_CHAIN), True)
-check("перша модель — найшвидша", main.MODEL_CHAIN[0], "gemini-3.5-flash-lite")
+check("перша модель — найновіша", main.MODEL_CHAIN[0], "gemini-4-hydrogen")
 check("є модель, що бачить фото", "gemini-3.1-flash-lite" in main.MODEL_CHAIN, True)
 
 print("\nПерша модель відповіла — ланцюжок не витрачається далі")

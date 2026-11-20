@@ -73,10 +73,11 @@ client = genai.Client(api_key=API_KEY) if API_KEY else None
 # Порядок має сенс: спершу найшвидші, бо для конспекту швидкість важливіша за
 # глибину; 3.5-flash останній, бо він розумніший, але повільніший у рази.
 DEFAULT_MODEL_CHAIN = ",".join([
-    "gemini-3.5-flash-lite",
-    "gemini-flash-lite-latest",
+    "gemini-4-hydrogen",
+    "gemini-3.8-flash",
     "gemini-3.6-flash",
-    "gemini-3.5-flash",
+    "gemini-flash-lite-latest",
+    "gemini-3.5-flash-lite",
     "gemini-3.1-flash-lite",
 ])
 MODEL_CHAIN = [
@@ -978,6 +979,25 @@ def build_style_instruction(style_name: str, style_css: str) -> str:
     )
 
 
+def summarize_history_content(content: str) -> str:
+    """Стискає великі JSON-блоки карток у короткий підсумок для історії.
+
+    Якщо модель згенерувала 40+ карток, передавати весь JSON на кожному наступному
+    ході діалогу марно витрачає тисячі токенів і гальмує відповідь. Моделі для
+    контексту достатньо знати назву колоди та кількість створених карток.
+    """
+    text = (content or "").strip()
+    if text.startswith("{") and '"cards"' in text and '"deck_name"' in text:
+        try:
+            data = json.loads(text)
+            deck_name = data.get("deck_name", "без назви")
+            cards_count = len(data.get("cards", []))
+            return f"[Створено колоду «{deck_name}», кількість карток: {cards_count}]"
+        except Exception:
+            pass
+    return text
+
+
 async def ask_ai(prompt_text: str, history_list: list, file_bytes: bytes | None, mime_type: str | None,
                  style_name: str = "", style_css: str = ""):
     if client is None:
@@ -988,7 +1008,7 @@ async def ask_ai(prompt_text: str, history_list: list, file_bytes: bytes | None,
     context_str = ""
     for msg in history_list:
         role = msg.get("role", "user")
-        content = msg.get("content", "")
+        content = summarize_history_content(msg.get("content", ""))
         if content:
             context_str += f"{role}: {content}\n"
 
