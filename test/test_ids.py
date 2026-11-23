@@ -17,6 +17,8 @@ sys.path.insert(0, r"E:\learning\projects\anki-telegram-bot")
 
 from anki_ids import (
     InvalidIdError,
+    canonical_model_id,
+    canonical_model_name,
     deck_anki_id,
     model_anki_id,
     model_name_for,
@@ -95,6 +97,24 @@ for bad in ("", "card-1", "not-a-uuid", "12345", None, 42, "deck-" + "z" * 8):
         ok += 1; print(f"  ok   відхилено {bad!r}")
     except Exception as exc:
         check_that(f"відхилено {bad!r}", False, f"не та помилка: {type(exc).__name__}")
+
+print("\nКанонічні спільні моделі (дедуплікація стилів Anki)")
+cm1 = canonical_model_id(["Питання", "Відповідь"], style_name="Неон")
+cm2 = canonical_model_id(["Питання", "Відповідь"], style_name="Неон")
+cm3 = canonical_model_id(["Питання", "Відповідь", "Пояснення"], style_name="Неон")
+cm4 = canonical_model_id(["Питання", "Відповідь"], style_name="Темний")
+
+check_that("canonical model id 10 цифр", 1_000_000_000 <= cm1 <= 9_999_999_999)
+check("однакові поля та стиль -> однаковий model id", cm1, cm2)
+check_that("різні поля -> різний model id", cm1 != cm3)
+check_that("різний стиль -> різний model id", cm1 != cm4)
+
+cname1 = canonical_model_name(["Питання", "Відповідь"], style_name="Неон")
+cname2 = canonical_model_name(["Питання", "Відповідь", "Пояснення"], style_name="Неон")
+cname3 = canonical_model_name(["Питання", "Відповідь"])
+check("canonical model name Неон (2 поля)", cname1, "AnkiBot - Неон [2 полів]")
+check("canonical model name Неон (3 поля)", cname2, "AnkiBot - Неон [3 полів]")
+check("canonical model name дефолт", cname3, "AnkiBot - Стандарт [2 полів]")
 
 print(f"\n{ok} passed, {fail} failed")
 sys.exit(1 if fail else 0)

@@ -1,3 +1,13 @@
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>'"]/g, character => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    "'": '&#39;',
+    '"': '&quot;'
+  })[character]);
+}
+
 function haptic(type = 'light') {
   if (typeof navigator === 'undefined' || typeof navigator.vibrate !== 'function') return;
   if (type === 'error') {

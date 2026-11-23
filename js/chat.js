@@ -1,4 +1,4 @@
-﻿function renderMarkdown(source) {
+function renderMarkdown(source) {
   if (!window.marked) {
     return escapeHtml(source).replace(/\n/g, '<br>');
   }
@@ -247,19 +247,34 @@ function requestChatDelete(id) {
 
 function renderMessage(message) {
   if (message.type === 'loading') {
+    const isLive = Boolean(appState.isGenerating && appState.activeGenerationChatId === appState.activeChatId);
+    const stopButtonHtml = isLive
+      ? `<button type="button" class="mt-3.5 inline-flex items-center gap-1.5 rounded-xl border border-red-500/30 bg-red-500/10 px-2.5 py-1 text-[11px] font-bold text-red-400 hover:bg-red-500/20 transition active:scale-95" onclick="window.ProcessMonitor?.abortGeneration()">
+           <span class="inline-block h-2 w-2 rounded-sm bg-red-400"></span>
+           Зупинити генерацію
+         </button>`
+      : `<div class="mt-3.5 flex items-center gap-2">
+           <span class="text-[11px] text-app-hint">Генерацію перервано або сторінку перезавантажено</span>
+           <button type="button" class="inline-flex items-center gap-1.5 rounded-xl border border-app-hint/20 bg-app-surface px-2.5 py-1 text-[11px] font-bold text-app-text hover:bg-app-hint/10 transition active:scale-95" onclick="retryChat()">
+             Повторити запит
+           </button>
+         </div>`;
     return `
       <div class="message-enter mb-5 flex items-start gap-3" data-message-id="${escapeHtml(message.id)}">
         ${renderAssistantAvatar()}
         <div class="min-w-0 max-w-3xl flex-1 rounded-3xl rounded-tl-md border surface bg-app-surface p-4 shadow-sm">
-          <div class="flex items-center gap-2 text-xs font-bold text-app-hint">
-            <span class="spinner text-app-button"></span>
-            <span id="loadingStatus">Аналізую ваш запит…</span>
+          <div class="flex items-center justify-between gap-2">
+            <div class="flex items-center gap-2 text-xs font-bold text-app-hint">
+              <span class="spinner text-app-button"></span>
+              <span id="loadingStatus">${isLive ? 'Аналізую ваш запит…' : 'Генерація (стан збережено)'}</span>
+            </div>
           </div>
           <div class="mt-4 space-y-2.5">
             <div class="skeleton h-3 w-11/12 rounded-full"></div>
             <div class="skeleton h-3 w-full rounded-full"></div>
             <div class="skeleton h-3 w-4/5 rounded-full"></div>
           </div>
+          ${stopButtonHtml}
         </div>
       </div>
     `;
@@ -366,8 +381,8 @@ function renderCards(message) {
           <div class="card-fields">
             ${visibleRest.map(([name, value], position) => `
               <div class="anki-field anki-field-${position + 2}" data-field="${escapeHtml(name)}">
-                <div class="text-[10px] font-extrabold uppercase tracking-wider anki-field-name ${position === 0 ? 'text-emerald-500' : 'text-app-hint'}">${escapeHtml(name)}</div>
-                <div class="card-field-value text-xs font-bold leading-5 anki-field-value">${escapeHtml(value)}</div>
+                <div class="text-[10px] font-extrabold uppercase tracking-wider anki-field-name label ${position === 0 ? 'text-emerald-500' : 'text-app-hint'}">${escapeHtml(name)}</div>
+                <div class="card-field-value text-xs font-bold leading-5 anki-field-value content">${escapeHtml(value)}</div>
               </div>
             `).join('') || '<div class="text-xs text-app-hint">Немає додаткових полів</div>'}
           </div>
@@ -412,7 +427,7 @@ function updateMessageInput() {
   elements.sendButton.disabled = !elements.messageInput.value.trim() && !appState.selectedFile;
 }
 
-async function getAssistantReply(text, file) {
+async function getAssistantReply(text, file, signal = null) {
   const form = new FormData();
   form.append('message', text);
   form.append('history', JSON.stringify(appState.messages.slice(-10).map(message => ({
@@ -427,7 +442,7 @@ async function getAssistantReply(text, file) {
     form.append('style_css', chosen.css);
   }
   if (file) form.append('document', file);
-  const response = await apiFetch('/api/chat', { method: 'POST', body: form });
+  const response = await apiFetch('/api/chat', { method: 'POST', body: form, signal });
   const payload = await response.json();
   const model = payload.model && typeof payload.model === 'object' ? payload.model : {};
   const fieldNames = resolveFieldNames(payload.cards || [], model.field_names);
@@ -582,6 +597,18 @@ async function submitChat() {
   const text = elements.messageInput.value.trim();
   const file = appState.selectedFile;
   if (!text && !file) return;
+
+  // Якщо попередня генерація ще триває — перериваємо її
+  if (appState.activeChatAbortController) {
+    try {
+      appState.activeChatAbortController.abort();
+    } catch (_) {}
+    appState.activeChatAbortController = null;
+  }
+
+  const abortController = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  appState.activeChatAbortController = abortController;
+
   const userMessage = {
     id: createId(),
     role: 'user',
@@ -608,6 +635,13 @@ async function submitChat() {
   appState.selectedFile = null;
   clearAttachment();
   updateMessageInput();
+
+  appState.isGenerating = true;
+  appState.activeGenerationChatId = targetChatId;
+  appState.activeLoadingMessageId = loadingMessage.id;
+  appState.activeGenerationPrompt = (text || 'документ').slice(0, 50);
+  appState.activeGenerationStartTime = Date.now();
+
   renderMessages(true);
   haptic();
   // Запит користувача зберігається одразу, ще до відповіді: якщо
@@ -617,11 +651,21 @@ async function submitChat() {
   window.ProcessMonitor?.addEvent('Запит надіслано: "' + (text ? text.slice(0, 35) + '...' : 'документ') + '"', 'info');
   window.ProcessMonitor?.setStep(2);
   window.ProcessMonitor?.setState('searching', 'Пошук вільної моделі Gemini...', 'Опитування fallback-ланцюжка...');
-  const processPollTimer = setInterval(() => window.ProcessMonitor?.fetchStatus(), 600);
+  window.ProcessMonitor?.render();
+
+  let processPollTimer = null;
   try {
-    const response = await getAssistantReply(text || 'Проаналізуй прикріплений документ', file);
+    processPollTimer = setInterval(() => window.ProcessMonitor?.fetchStatus(), 600);
+    const response = await getAssistantReply(
+      text || 'Проаналізуй прикріплений документ',
+      file,
+      abortController ? abortController.signal : null
+    );
     appState.lastAttemptedFile = null;
-    clearInterval(processPollTimer);
+    if (processPollTimer) {
+      clearInterval(processPollTimer);
+      processPollTimer = null;
+    }
     window.ProcessMonitor?.setStep(3);
     window.ProcessMonitor?.addEvent('Отримано відповідь від Gemini, валідація карток...', 'success');
     window.ProcessMonitor?.setStep(4);
@@ -643,6 +687,27 @@ async function submitChat() {
     haptic('success');
   } catch (error) {
     clearInterval(processPollTimer);
+    const isAborted = Boolean(
+      (error && (error.name === 'AbortError' || String(error.message || '').toLowerCase().includes('aborted'))) ||
+      (error && error.status === 499)
+    );
+
+    if (isAborted) {
+      window.ProcessMonitor?.setState('idle', 'Генерацію перервано');
+      window.ProcessMonitor?.addEvent('Генерацію зупинено користувачем', 'warning');
+      window.ProcessMonitor?.fetchStatus();
+      placeAssistantMessage(targetChatId, targetMessages, loadingMessage.id, {
+        id: createId(),
+        role: 'assistant',
+        type: 'text',
+        content: 'Генерацію відповіді зупинено за запитом користувача.',
+        createdAt: Date.now()
+      });
+      if (appState.activeChatId === targetChatId) renderMessages(true);
+      persistChat();
+      return;
+    }
+
     window.ProcessMonitor?.setState('error', 'Помилка виконання', error && error.message ? error.message : 'Помилка');
     window.ProcessMonitor?.addEvent('Помилка: ' + (error && error.message ? error.message : 'Помилка запиту'), 'error');
     window.ProcessMonitor?.fetchStatus();
@@ -664,6 +729,20 @@ async function submitChat() {
     persistChat();
     showToast('Помилка запиту до API', 'error');
     haptic('error');
+  } finally {
+    if (processPollTimer) {
+      clearInterval(processPollTimer);
+      processPollTimer = null;
+    }
+    if (appState.activeChatAbortController === abortController) {
+      appState.activeChatAbortController = null;
+      appState.isGenerating = false;
+      appState.activeGenerationChatId = null;
+      appState.activeLoadingMessageId = null;
+      appState.activeGenerationPrompt = null;
+      appState.activeGenerationStartTime = null;
+      window.ProcessMonitor?.render();
+    }
   }
 }
 
@@ -673,7 +752,7 @@ function retryChat() {
   // splice, а не присвоєння нового масиву: appState.messages — це
   // посилання на messages активного чату, і новий масив відірвав би його
   // від списку чатів. Наступне ж збереження записало б у чат стару стрічку.
-  const kept = appState.messages.filter(message => message.type !== 'error');
+  const kept = appState.messages.filter(message => message.type !== 'error' && message.type !== 'loading');
   appState.messages.splice(0, appState.messages.length, ...kept);
   elements.messageInput.value = lastUserMessage.content;
   if (appState.lastAttemptedFile) {
@@ -682,6 +761,7 @@ function retryChat() {
   }
   updateMessageInput();
   renderMessages(true);
+  submitChat();
 }
 
 function showAttachment() {

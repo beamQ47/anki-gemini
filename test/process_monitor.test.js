@@ -109,9 +109,15 @@ const { sandbox, elements } = loadApp();
 // 1. ProcessMonitor is exported
 ok('ProcessMonitor is exported on window', typeof sandbox.window.ProcessMonitor === 'object');
 
-// 2. Default active model is gemini-4-hydrogen
+// 2. Default active model is gemini-flash-lite-latest
 sandbox.window.ProcessMonitor.render();
-check('Default active model badge is gemini-4-hydrogen', elements.processActiveModelBadge.textContent, 'gemini-4-hydrogen');
+check('Default active model badge is gemini-flash-lite-latest', elements.processActiveModelBadge.textContent, 'gemini-flash-lite-latest');
+
+// 2b. Abort generation is exported and can be called
+ok('abortGeneration is exported on window.ProcessMonitor', typeof sandbox.window.ProcessMonitor.abortGeneration === 'function');
+ok('abortGenerationButton exists in elements', Boolean(elements.abortGenerationButton));
+sandbox.window.ProcessMonitor.abortGeneration();
+check('Status is idle after abort', elements.processCurrentStatusText.textContent, 'Генерацію перервано користувачем');
 
 // 3. Chain count reflects 6 models
 check('Chain count reflects 6 models', elements.processModelChainCount.textContent, 'черга 1 → 6');
@@ -166,5 +172,5 @@ sandbox.window.ProcessMonitor.fetchStatus().then(() => {
   check('Chain count matches backend model_chain length', elements.processModelChainCount.textContent, 'черга 1 → 6');
 
   console.log(`\n${pass} passed, ${fail} failed`);
-  if (fail > 0) process.exit(1);
+  process.exit(fail > 0 ? 1 : 0);
 });

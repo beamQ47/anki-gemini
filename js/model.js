@@ -661,6 +661,8 @@ function buildExportPayload(deck, decks) {
   const names = deckFieldNames(deck);
   const cards = normalizeCards((deck && deck.cards) || [], names);
   const rootId = normalizeUuid(deck && deck.id);
+  const styleId = (deck && deck.styleId) || '';
+  const styleName = (deck && (deck.style_name || deck.styleName)) || '';
 
   return {
     deck_id: rootId,
@@ -670,6 +672,8 @@ function buildExportPayload(deck, decks) {
     css: String((deck && deck.modelCss) || ''),
     templates: Array.isArray(deck && deck.templates) ? deck.templates : [],
     cards: cards.map((card) => ({ id: normalizeUuid(card.id), values: card.values })),
+    style_id: styleId,
+    style_name: styleName,
     // Корінь уже надіслано полями вище, тож subtree — це строго
     // нащадки. Так старий сервер (без поля subtree) лишається сумісним.
     subtree: buildSubtreeExportNodes(deck, decks).filter((node) => node.deck_id !== rootId)
@@ -712,6 +716,8 @@ function buildSubtreeExportNodes(deck, decks) {
 
     const names = deckFieldNames(node);
     const cards = normalizeCards((node && node.cards) || [], names);
+    const styleId = (node && node.styleId) || '';
+    const styleName = (node && (node.style_name || node.styleName)) || '';
     out.push({
       deck_id: id,
       title: String((node && node.title) || '').trim() || 'Моя колода',
@@ -719,7 +725,9 @@ function buildSubtreeExportNodes(deck, decks) {
       field_names: names,
       css: String((node && node.modelCss) || ''),
       templates: Array.isArray(node && node.templates) ? node.templates : [],
-      cards: cards.map((card) => ({ id: normalizeUuid(card.id), values: card.values }))
+      cards: cards.map((card) => ({ id: normalizeUuid(card.id), values: card.values })),
+      style_id: styleId,
+      style_name: styleName
     });
 
     for (const child of childrenOf.get(id) || []) visit(child);

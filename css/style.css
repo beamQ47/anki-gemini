@@ -1137,6 +1137,10 @@ button > svg[data-lucide] {
   border-bottom: 1px solid rgba(127, 127, 127, 0.25);
 }
 
+.deck-preview-scope .anki-field:has(.label) {
+  border-bottom: none;
+}
+
 .deck-preview-scope .anki-field:last-child {
   margin-bottom: 0;
   padding-bottom: 0;

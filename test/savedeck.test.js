@@ -352,8 +352,9 @@ for (const fn of ['confirmDeckModal', 'openDeckModal', 'canMergeCards', 'deckFie
     switchToCurrentUserCache();
   `);
   const afterReload = evalReloaded('appState.messages');
-  check('після перезавантаження чат відновлено', afterReload.length, 1);
+  check('після перезавантаження чат відновлено разом із loading', afterReload.length, 2);
   check('відновлено саме те повідомлення', afterReload[0].content, 'питання після F5');
+  check('стан loading від ШІ збережено і не зник', afterReload[1].type, 'loading');
 
   console.log('\nБАГ 2 (продовження): чат прив’язаний до акаунта');
   const otherKey = 'anki-gemini-messages-v1:u2';

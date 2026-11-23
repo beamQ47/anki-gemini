@@ -115,7 +115,7 @@
         <div class="rounded-2xl border muted-surface border-app-hint/15 p-3.5">
           <div class="flex items-center justify-between gap-2 mb-2">
             <span class="text-[11px] font-extrabold uppercase tracking-wide text-app-hint">Поточний стан</span>
-            <span id="processActiveModelBadge" class="rounded-lg bg-violet-500/15 px-2 py-0.5 text-[10px] font-bold text-violet-400">gemini-4-hydrogen</span>
+            <span id="processActiveModelBadge" class="rounded-lg bg-violet-500/15 px-2 py-0.5 text-[10px] font-bold text-violet-400">gemini-flash-lite-latest</span>
           </div>
           <p id="processCurrentStatusText" class="text-xs font-semibold text-app-text">Очікування запиту</p>
           <p id="processCurrentDetailsText" class="mt-1 text-[11px] text-app-hint">Система готова. При відправці запиту тут відобразиться пошук доступної моделі в реальному часі.</p>
@@ -138,6 +138,31 @@
               <span class="step-dot flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-app-hint/15 text-[10px] font-bold">4</span>
               <span class="step-label">Валідація LaTeX і рендеринг</span>
             </div>
+          </div>
+        </div>
+
+        <!-- Керування активною генерацією (Переривання) -->
+        <div id="processControlCard" class="rounded-2xl border muted-surface border-app-hint/15 p-3.5 transition">
+          <div class="flex items-center justify-between gap-2 mb-2">
+            <span class="text-[11px] font-extrabold uppercase tracking-wide text-app-hint">Керування генерацією</span>
+            <span id="processRunningBadge" class="hidden rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-extrabold text-amber-400">В процесі</span>
+          </div>
+          <div id="processControlIdleState" class="text-xs text-app-hint flex items-center gap-2 py-1">
+            <i data-lucide="check-circle" class="h-4 w-4 text-emerald-500 shrink-0"></i>
+            <span>Немає активних генерацій</span>
+          </div>
+          <div id="processControlActiveState" class="hidden space-y-2.5">
+            <div class="rounded-xl border border-violet-500/30 bg-violet-500/10 p-2.5">
+              <div class="flex items-center justify-between text-[11px] text-violet-300 mb-1">
+                <span class="font-bold">Активний запит:</span>
+                <span id="processActiveElapsed" class="font-mono text-[10px]">0 с</span>
+              </div>
+              <p id="processActivePromptSnippet" class="truncate text-xs font-medium text-app-text">—</p>
+            </div>
+            <button id="abortGenerationButton" class="w-full flex items-center justify-center gap-2 rounded-xl bg-red-500/15 border border-red-500/30 px-3 py-2 text-xs font-bold text-red-400 hover:bg-red-500/25 transition active:scale-[0.98]" type="button">
+              <i data-lucide="square" class="h-4 w-4 fill-current"></i>
+              <span>Перервати генерацію</span>
+            </button>
           </div>
         </div>
 

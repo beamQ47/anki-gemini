@@ -1,4 +1,4 @@
-﻿const defaultDecks = [
+const defaultDecks = [
   {
     id: 'history-ukraine',
     title: 'Історія України',
@@ -255,10 +255,11 @@ function messagesStorageKey() {
 
 const MAX_CHATS = 60;
 
-// loading — тимчасовий стан, його відновлювати не треба: на екрані
-// з'явиться «думає» без відповіді, яка вже ніколи не прийде.
+// Повідомлення зберігаються всі, включно зі станом loading:
+// якщо користувач перезавантажить сторінку під час генерації (F5),
+// повідомлення про генерацію не зникає зі стрічки, а відображає поточний стан.
 function isStorableMessage(message) {
-  return message && typeof message === 'object' && message.type !== 'loading';
+  return Boolean(message && typeof message === 'object');
 }
 
 function normalizeMessages(messages) {
@@ -351,6 +352,14 @@ function switchChat(id, options = {}) {
 }
 
 function deleteChat(id) {
+  // Якщо видаляється чат, в якому наразі триває генерація, перериваємо її,
+  // щоб запит не зависав на сервері й не блокував чергу для наступного чату.
+  if (appState.activeGenerationChatId === id || (appState.activeChatId === id && appState.isGenerating)) {
+    if (typeof window.ProcessMonitor?.abortGeneration === 'function') {
+      window.ProcessMonitor.abortGeneration();
+    }
+  }
+
   const index = appState.chats.findIndex((chat) => chat.id === id);
   if (index < 0) return false;
   appState.chats.splice(index, 1);
@@ -2462,6 +2471,17 @@ function requestDeleteDeck(deckId) {
       }
 
       const payload = buildExportPayload(deck, appState.decks);
+      // Збагачуємо іменами стилів з бібліотеки для канонічних моделей Anki
+      if (!payload.style_name && payload.style_id) {
+        const st = findLibraryStyle(payload.style_id);
+        if (st && st.name) payload.style_name = st.name;
+      }
+      for (const sub of payload.subtree || []) {
+        if (!sub.style_name && sub.style_id) {
+          const st = findLibraryStyle(sub.style_id);
+          if (st && st.name) sub.style_name = st.name;
+        }
+      }
       // Порожні картки в самій колоді — норма для батька, його сенс у
       // нащадках. Відмовитися варто лише тоді, коли порожня вся гілка.
       const subtreeCards = payload.subtree.reduce((sum, node) => sum + node.cards.length, 0);
@@ -2520,14 +2540,27 @@ function prefixSelectorList(selectorText, scope) {
     .split(',')
     .map((part) => {
       const trimmed = part.trim();
-      return trimmed ? `${scope} ${trimmed}` : '';
+      if (!trimmed) return '';
+      // :root перетворюємо на сам scope, щоб CSS-змінні (:root { --var: val })
+      // діяли всередині прев'ю, а не шукали неіснуючий :root всередині div.
+      if (trimmed === ':root') {
+        return scope;
+      }
+      return `${scope} ${trimmed}`;
     })
     .filter(Boolean)
     .join(', ');
 }
 
+function normalizeCardCss(css) {
+  if (!css) return '';
+  return String(css)
+    .replace(/(?<![.\w#-])card\b/g, '.card')
+    .replace(/(?<![.\w#-])question\b/g, '.anki-question');
+}
+
 function scopePreviewCss(css, scope) {
-  const source = String(css || '');
+  const source = normalizeCardCss(String(css || ''));
   if (!source.trim()) return '';
 
   const parse = (src) => {
@@ -2614,13 +2647,11 @@ function buildPreviewFaces(card, fieldNames) {
     .filter(([name, value]) => typeof isFieldEmpty === 'function' ? !isFieldEmpty(value) : String(value ?? '').trim().length > 0)
     .map(([name, value], index) => (
       `<div class="anki-field anki-field-${index + 2}" data-field="${escapeHtml(name)}">` +
-      `<div class="anki-field-name">${escapeHtml(name)}</div>` +
-      `<div class="anki-field-value">${escapeHtml(value)}</div>` +
+      `<div class="anki-field-name label">${escapeHtml(name)}</div>` +
+      `<div class="anki-field-value content">${escapeHtml(value)}</div>` +
       '</div>'
     ));
-  // На зворотному показуємо лише зворотні поля (відповідь, пояснення тощо),
-  // без дублювання лицьової сторони.
-  const back = blocks.length ? blocks.join('') : front;
+  const back = blocks.length ? `${front}<hr id="answer">${blocks.join('')}` : front;
   return { front, back };
 }
 

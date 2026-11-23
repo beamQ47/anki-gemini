@@ -99,7 +99,7 @@ print("Ланцюжок за замовчуванням")
 check("це список моделей", isinstance(main.MODEL_CHAIN, list), True)
 check("не порожній", len(main.MODEL_CHAIN) > 0, True)
 check("усі моделі названі рядками", all(isinstance(m, str) and m for m in main.MODEL_CHAIN), True)
-check("перша модель — найновіша", main.MODEL_CHAIN[0], "gemini-4-hydrogen")
+check("перша модель — найшвидша", main.MODEL_CHAIN[0], "gemini-flash-lite-latest")
 check("є модель, що бачить фото", "gemini-3.1-flash-lite" in main.MODEL_CHAIN, True)
 
 print("\nПерша модель відповіла — ланцюжок не витрачається далі")
@@ -231,6 +231,12 @@ app_js = open(os.path.join(ROOT, "js", "app.js"), encoding="utf-8").read()
 check_that("docx прибрано зі списку розширень", "'docx'" not in app_js, "")
 for ext in ("png", "jpg", "jpeg", "webp", "heic", "pdf", "txt", "md", "csv"):
     check_that(f"браузер пускає .{ext}", f"'{ext}'" in app_js, "")
+
+print("\nСкасування генерації через /api/chat/cancel")
+with TestClient(main.app) as client:
+    r = client.post("/api/chat/cancel")
+    check("cancel статус 200", r.status_code, 200)
+    check_that("повідомлення про скасування або відсутність процесу", "зупинено" in r.json()["message"] or "Немає" in r.json()["message"], r.text)
 
 print(f"\n{ok} passed, {fail} failed")
 sys.exit(1 if fail else 0)

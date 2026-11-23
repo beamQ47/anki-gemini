@@ -1,4 +1,4 @@
-﻿// Адреса бекенду. Локально index.html і API віддає один процес, тож
+// Адреса бекенду. Локально index.html і API віддає один процес, тож
 // достатньо same-origin. На GitHub Pages бекенд окремий — Render.
 // Для інших випадків лишається ручний override:
 //   window.ANKI_API_BASE_URL = 'http://127.0.0.1:8000';
@@ -147,7 +147,14 @@ const elements = {
   stepRequest: document.getElementById('stepRequest'),
   stepModelSearch: document.getElementById('stepModelSearch'),
   stepGeneration: document.getElementById('stepGeneration'),
-  stepDone: document.getElementById('stepDone')
+  stepDone: document.getElementById('stepDone'),
+  processControlCard: document.getElementById('processControlCard'),
+  processRunningBadge: document.getElementById('processRunningBadge'),
+  processControlIdleState: document.getElementById('processControlIdleState'),
+  processControlActiveState: document.getElementById('processControlActiveState'),
+  processActiveElapsed: document.getElementById('processActiveElapsed'),
+  processActivePromptSnippet: document.getElementById('processActivePromptSnippet'),
+  abortGenerationButton: document.getElementById('abortGenerationButton')
 };
 
 const appState = {
@@ -464,18 +471,21 @@ function getModelTag(name, idx, total) {
 const processState = {
   isOpen: false,
   status: 'idle',
-  activeModel: 'gemini-4-hydrogen',
+  activeModel: 'gemini-flash-lite-latest',
   stepDescription: 'Система готова до роботи',
-  lastModel: 'gemini-4-hydrogen',
-  lastLatencyMs: 1490,
+  lastModel: 'gemini-flash-lite-latest',
+  lastLatencyMs: 600,
   step: 0,
+  isGenerating: false,
+  activeTaskPrompt: null,
+  activeTaskStartTime: null,
   modelChain: [
-    { name: 'gemini-4-hydrogen', tag: 'Основна' },
+    { name: 'gemini-flash-lite-latest', tag: 'Основна' },
+    { name: 'gemini-3.5-flash-lite', tag: 'Швидка' },
+    { name: 'gemini-3.1-flash-lite', tag: 'Зір/Файли' },
     { name: 'gemini-3.8-flash', tag: 'Розумна' },
-    { name: 'gemini-3.6-flash', tag: 'Резерв 2' },
-    { name: 'gemini-flash-lite-latest', tag: 'Швидка' },
-    { name: 'gemini-3.5-flash-lite', tag: 'Резерв 4' },
-    { name: 'gemini-3.1-flash-lite', tag: 'Фулбек' }
+    { name: 'gemini-3.6-flash', tag: 'Резерв' },
+    { name: 'gemini-4-hydrogen', tag: 'Фулбек' }
   ],
   events: [
     {
@@ -587,7 +597,7 @@ function renderProcessDrawer() {
     elements.processModelChainCount.textContent = `черга 1 → ${processState.modelChain.length}`;
   }
   if (elements.processActiveModelBadge) {
-    elements.processActiveModelBadge.textContent = processState.activeModel || processState.lastModel || 'gemini-4-hydrogen';
+    elements.processActiveModelBadge.textContent = processState.activeModel || processState.lastModel || 'gemini-flash-lite-latest';
   }
   if (elements.processCurrentStatusText) {
     elements.processCurrentStatusText.textContent = processState.stepDescription || 'Очікування запиту';
@@ -599,6 +609,34 @@ function renderProcessDrawer() {
       elements.processCurrentDetailsText.textContent = 'Останній запит завершився з помилкою. Перевірте мережу або квоту.';
     } else {
       elements.processCurrentDetailsText.textContent = 'Система готова. При відправці запиту тут відобразиться пошук доступної моделі в реальному часі.';
+    }
+  }
+
+  // Оновлення картки керування генерацією
+  const isGenerating = Boolean(appState.isGenerating || processState.isGenerating || isBusy);
+  if (elements.processRunningBadge) {
+    if (isGenerating) {
+      elements.processRunningBadge.classList.remove('hidden');
+    } else {
+      elements.processRunningBadge.classList.add('hidden');
+    }
+  }
+  if (elements.processControlIdleState && elements.processControlActiveState) {
+    if (isGenerating) {
+      elements.processControlIdleState.classList.add('hidden');
+      elements.processControlActiveState.classList.remove('hidden');
+      if (elements.processActivePromptSnippet) {
+        const snippet = appState.activeGenerationPrompt || processState.activeTaskPrompt || 'Запит обробляється...';
+        elements.processActivePromptSnippet.textContent = snippet;
+      }
+      if (elements.processActiveElapsed) {
+        const start = appState.activeGenerationStartTime || processState.activeTaskStartTime || Date.now();
+        const sec = Math.max(0, Math.round((Date.now() - start) / 1000));
+        elements.processActiveElapsed.textContent = `${sec} с`;
+      }
+    } else {
+      elements.processControlIdleState.classList.remove('hidden');
+      elements.processControlActiveState.classList.add('hidden');
     }
   }
 
@@ -681,7 +719,10 @@ function clearProcessLog() {
 
 async function fetchProcessStatus() {
   try {
-    const res = await fetch(getApiUrl('/api/system/process-status'));
+    const token = typeof getAccessToken === 'function' ? await getAccessToken() : null;
+    const res = await fetch(getApiUrl('/api/system/process-status'), {
+      headers: token ? { Authorization: 'Bearer ' + token } : {}
+    });
     if (!res.ok) return;
     const data = await res.json();
     if (!data) return;
@@ -725,7 +766,46 @@ async function fetchProcessStatus() {
         if (processState.events.length > 50) processState.events.length = 50;
       }
     }
+    if (typeof data.is_generating === 'boolean') {
+      processState.isGenerating = data.is_generating;
+    }
+    if (data.active_task) {
+      processState.activeTaskPrompt = data.active_task.prompt || null;
+      processState.activeTaskStartTime = data.active_task.start_time || null;
+    } else if (!appState.isGenerating) {
+      processState.activeTaskPrompt = null;
+      processState.activeTaskStartTime = null;
+    }
     renderProcessDrawer();
+  } catch (_) {}
+}
+
+async function abortActiveGeneration() {
+  // 1. Локальне переривання браузерного fetch
+  if (appState.activeChatAbortController) {
+    try {
+      appState.activeChatAbortController.abort();
+    } catch (_) {}
+    appState.activeChatAbortController = null;
+  }
+
+  appState.isGenerating = false;
+  appState.activeGenerationChatId = null;
+  appState.activeGenerationPrompt = null;
+  appState.activeGenerationStartTime = null;
+
+  // Оновлення ProcessMonitor одразу, не чекаючи мережевої відповіді
+  processState.status = 'idle';
+  processState.stepDescription = 'Генерацію перервано користувачем';
+  processState.isGenerating = false;
+  processState.activeTaskPrompt = null;
+  processState.activeTaskStartTime = null;
+  addProcessEvent('Генерацію зупинено користувачем', 'warning');
+  renderProcessDrawer();
+
+  // 2. Сповіщення бекенду для зупинки асинхронного таску
+  try {
+    await apiFetch('/api/chat/cancel', { method: 'POST', retries: 0 });
   } catch (_) {}
 }
 
@@ -749,7 +829,9 @@ window.ProcessMonitor = {
   setState: setProcessState,
   setStep: setProcessStep,
   fetchStatus: fetchProcessStatus,
-  render: renderProcessDrawer
+  render: renderProcessDrawer,
+  abortGeneration: abortActiveGeneration,
+  isBusy: () => Boolean(appState.isGenerating || processState.status === 'searching' || processState.status === 'generating')
 };
 
 elements.openSidebarButton.addEventListener('click', openDrawer);
@@ -761,6 +843,7 @@ if (elements.closeProcessDrawerButton) elements.closeProcessDrawerButton.addEven
 if (elements.processDrawerBackdrop) elements.processDrawerBackdrop.addEventListener('click', closeProcessDrawer);
 if (elements.sidebarProcessButton) elements.sidebarProcessButton.addEventListener('click', openProcessDrawer);
 if (elements.clearProcessLogButton) elements.clearProcessLogButton.addEventListener('click', clearProcessLog);
+if (elements.abortGenerationButton) elements.abortGenerationButton.addEventListener('click', abortActiveGeneration);
 elements.chatSwitcherButton.addEventListener('click', () => toggleChatPanel());
 elements.newChatButton.addEventListener('click', () => {
   createChat();

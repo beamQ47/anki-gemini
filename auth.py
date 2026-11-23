@@ -59,6 +59,17 @@ _http_client: httpx.AsyncClient | None = None
 _client_loop: asyncio.AbstractEventLoop | None = None
 
 
+def _prune_cache_if_needed() -> None:
+    """Видаляє прострочені токени, якщо розмір кешу перевищує поріг."""
+    if len(_cache) > 256:
+        now = time.time()
+        expired_keys = [k for k, v in _cache.items() if v[1] <= now]
+        for k in expired_keys:
+            _cache.pop(k, None)
+        if len(_cache) > 512:
+            _cache.clear()
+
+
 def _get_http_client() -> httpx.AsyncClient:
     global _http_client, _client_loop
     try:
@@ -147,6 +158,7 @@ async def current_user_id(authorization: str | None = Header(default=None)) -> s
     if user.get("role") and user.get("role") not in ALLOWED_ROLES:
         raise AuthError("Токен не має ролі користувача")
 
+    _prune_cache_if_needed()
     _cache[key] = (user_id, time.time() + CACHE_TTL)
     return user_id
 

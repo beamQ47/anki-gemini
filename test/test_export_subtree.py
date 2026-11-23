@@ -160,16 +160,41 @@ check("у математики рівно один запис у col.decks",
       [k for k, v in names.items() if v == "університет::математика"],
       [deck_anki_id(M)])
 check("її картка на місці", cards_of.get(C1), deck_anki_id(M))
-check("модель математики вказує на неї, а не на іншу",
-      models.get(deck_anki_id(M)), [model_anki_id(M)])
 
-print("\nМоделі різних колод не зливаються")
-check("модель лекції 1 -> лекція 1", models.get(deck_anki_id(L)), [model_anki_id(L)])
-check("модель лекції 2 -> лекція 2", models.get(deck_anki_id(L2)), [model_anki_id(L2)])
-check("модель математики -> математика", models.get(deck_anki_id(M)), [model_anki_id(M)])
-check("у трьох колод різні моделі",
-      len({m for did in (deck_anki_id(M), deck_anki_id(L), deck_anki_id(L2))
-           for m in models.get(did, [])}), 3)
+print("\nДедуплікація моделей: спільний стиль для колод з однаковими полями")
+# Колоди з однаковими полями та стилем ділять одну спільну модель Anki,
+# щоб не створювати дублікатів стилів при імпорті.
+total_unique_models = len({m for m_list in models.values() for m in m_list})
+check("у трьох колод з однаковими полями одна спільна модель", total_unique_models, 1)
+
+# Різні поля -> різні моделі
+diff_subtree = [
+    node(M, "математика", [(C1, "200")], [(U, "університет")]),
+    {
+        "deck_id": L2,
+        "title": "лекція 2",
+        "field_names": ["Питання", "Відповідь", "Пояснення"],
+        "css": "",
+        "templates": [],
+        "cards": [{"id": C3, "values": {"Питання": "друга", "Відповідь": "a", "Пояснення": "exp"}}],
+        "ancestors": [{"id": U, "title": "університет"}, {"id": M, "title": "математика"}],
+    },
+]
+diff_req = DeckExportRequest(
+    title=req.title,
+    field_names=req.field_names,
+    deck_id=U,
+    ancestors=[],
+    cards=[],
+    subtree=diff_subtree,
+)
+diff_root = build_anki_deck(title=diff_req.title, field_names=diff_req.field_names, cards=[],
+                            deck_uuid=diff_req.normalized_deck_uuid(),
+                            ancestors=diff_req.normalized_ancestors())
+_, _, diff_models = read_col(write(
+    build_subtree_package(diff_root, diff_req.normalized_ancestors(), diff_req.subtree)))
+diff_unique_models = len({m for m_list in diff_models.values() for m in m_list})
+check("колоди з різними полями отримують окремі моделі", diff_unique_models, 2)
 
 print("\nКорінь без полів не ламає експорт")
 # У кореня немає власних полів — build_anki_deck кидає ValueError, і

@@ -114,10 +114,14 @@ const DECK = {
   const f = scope('__faces(appState.decks[0].cards[0], ["Код","Назва","Приклад","Джерело"])');
   checkThat('лицьова — це лише перше поле в .anki-question',
     f.front === '<div class="anki-question anki-field-1" data-field="Код">200</div>', `отримано: ${f.front}`);
-  checkThat('зворотна містить лише зворотні поля, без лицьової сторони',
-    !f.back.includes(f.front), `отримано: ${f.back.slice(0, 60)}`);
-  checkThat('зворотна не дублює лицьове питання',
-    !f.back.includes('anki-question'), '');
+  checkThat('зворотна містить роздільник відповіді',
+    f.back.includes('<hr id="answer">'), `отримано: ${f.back.slice(0, 60)}`);
+  checkThat('зворотна містить лицьове питання',
+    f.back.includes(f.front), '');
+  checkThat('підписи мають клас label',
+    f.back.includes('anki-field-name label'), '');
+  checkThat('значення мають клас content',
+    f.back.includes('anki-field-value content'), '');
   checkThat('кожне інше поле — окремий блок з підписом',
     (f.back.match(/class="anki-field anki-field-/g) || []).length === 3,
     `блоків: ${(f.back.match(/class="anki-field anki-field-/g) || []).length}`);
@@ -147,6 +151,8 @@ const DECK = {
   const frames = scope('__scope("@keyframes spin { from { opacity: 0; } to { opacity: 1; } }", ".deck-preview-scope")');
   checkThat('@keyframes не ламається префіксом',
     frames.includes('from {') && !frames.includes('.deck-preview-scope from'), `отримано: ${frames}`);
+  const rootScoped = scope('__scope(":root { --accent: cyan; }", ".deck-preview-scope")');
+  checkThat(':root мапиться на scope контейнер', rootScoped.includes('.deck-preview-scope') && !rootScoped.includes('.deck-preview-scope :root'), `отримано: ${rootScoped}`);
   const _e = scope('__scope("", ".deck-preview-scope")');
   // check, а не checkThat: порожній рядок false-істимий і
   // checkThat сприйняв би його як провал

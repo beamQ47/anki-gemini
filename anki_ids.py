@@ -82,6 +82,55 @@ def model_name_for(deck_uuid: str) -> str:
     return "Model_" + normalize_uuid(deck_uuid).replace("-", "")[:8]
 
 
+def canonical_model_id(
+    field_names: list[str],
+    style_name: str | None = None,
+    css: str | None = None,
+) -> int:
+    """Стабільний ID моделі на основі списку полів та стилю.
+
+    Колоди з однаковими полями та стилем ділять один model_id в Anki,
+    що усуває дублювання стилів і створення зайвих моделей при кожному експорті.
+    """
+    clean_fields = [f.strip().lower() for f in (field_names or []) if f and f.strip()]
+    fields_key = ":".join(clean_fields)
+
+    clean_style = (style_name or "").strip().lower()
+    if not clean_style and css:
+        css_sig = hashlib.sha256(css.strip().encode("utf-8")).hexdigest()[:8]
+        clean_style = f"css_{css_sig}"
+
+    sig = f"canonical:{fields_key}:{clean_style or 'default'}"
+    digest = hashlib.sha256(f"model:{sig}".encode("utf-8")).digest()
+    return _ID_MIN + (int.from_bytes(digest[:8], "big") % _ID_SPAN)
+
+
+def canonical_model_name(
+    field_names: list[str],
+    style_name: str | None = None,
+    css: str | None = None,
+) -> str:
+    """Зрозуміла і стабільна назва моделі для Anki.
+
+    Наприклад: 'AnkiBot - Неон [3 поля]' або 'AnkiBot - Стандарт [2 поля]'.
+    """
+    clean_fields = [f.strip() for f in (field_names or []) if f and f.strip()]
+    count_label = f"[{len(clean_fields)} полів]" if clean_fields else ""
+
+    raw_style = (style_name or "").strip()
+    if raw_style:
+        style_label = "".join(
+            c for c in raw_style if c.isalnum() or c in (" ", "-", "_")
+        ).strip()
+    elif css and css.strip():
+        css_sig = hashlib.sha256(css.strip().encode("utf-8")).hexdigest()[:6]
+        style_label = f"Стиль {css_sig}"
+    else:
+        style_label = "Стандарт"
+
+    return f"AnkiBot - {style_label} {count_label}".strip()
+
+
 def note_guid(note_uuid: str) -> str:
     """GUID нотатки = власний UUID нотатки.
 

@@ -26,7 +26,10 @@ check_that("на лицьовій лише перше поле", t["qfmt"].count
 check("на зворотному 4 поля", t["afmt"].count("anki-field-value"), 4)
 check_that("кожне поле має підпис", t["afmt"].count("anki-field-name") == 4)
 check_that("підписи екрановані", "&" in t["afmt"] or "Поле" not in t["afmt"])
-check_that("лицьова не дублюється на зворотному", "{{FrontSide}}" not in t["afmt"])
+check_that("роздільник відповіді", '<hr id="answer">' in t["afmt"])
+check_that("лицьова сторона присутня на зворотному", "{{FrontSide}}" in t["afmt"])
+check_that("підпис має дуальний клас label", t["afmt"].count("anki-field-name label") == 4)
+check_that("значення має дуальний клас content", t["afmt"].count("anki-field-value content") == 4)
 check_that("пропущені поля імені не потрапляють у шаблон",
            all(f"{{{{{f}}}}}" in t["afmt"] for f in FIELDS[1:]))
 
@@ -57,10 +60,11 @@ print("\nmerge_css")
 merged = merge_css(".card { color: red; }")
 check_that("CSS Gemini присутній", "color: red" in merged)
 check_that("базові стилі є", ".anki-question" in merged)
-check_that("стилі полів останні", merged.rstrip().endswith("}"))
-check_that("стилі полів після CSS Gemini",
-           merged.index("color: red") < merged.index(".anki-field-name"))
+check_that("CSS користувача перекриває дефолти",
+           merged.index(".anki-field-name") < merged.index("color: red"))
 check_that("порожній CSS не ламає", bool(merge_css("").strip()))
+merged_import = merge_css("@import url('font.css');\n.card { color: red; }")
+check_that("@import перенесено на початок", merged_import.startswith("@import"))
 
 print("\nреальний .apkg")
 deck = build_anki_deck("НПЗІБ", FIELDS, CARDS, css=".card { color: #123456; }")
@@ -78,11 +82,11 @@ check("полів у моделі", [f["name"] for f in m["flds"]], FIELDS)
 check("шаблон один", len(m["tmpls"]), 1)
 afmt = m["tmpls"][0]["afmt"]
 check("блоків полів", afmt.count('class="anki-field anki-field-'), 4)
-check("підписів полів", afmt.count('<div class="anki-field-name">'), 4)
+check("підписів полів", afmt.count('<div class="anki-field-name label">'), 4)
 check_that("усі 5 імен у шаблоні", all(f"{{{{{f}}}}}" in afmt or f"{{{{{f}}}}}" in m["tmpls"][0]["qfmt"] for f in FIELDS))
 check_that("Anki не відкинув наш CSS", "anki-field-name" in m["css"])
 check_that("CSS Gemini збережено", "#123456" in m["css"])
-check_that("стилі полів після CSS Gemini", m["css"].index("#123456") < m["css"].index(".anki-field-name"))
+check_that("CSS користувача після дефолтів моделі", m["css"].index(".anki-field-name") < m["css"].index("#123456"))
 
 print("\nочищення філерів у build_anki_deck")
 test_cards_filler = [
