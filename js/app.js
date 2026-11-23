@@ -2,8 +2,9 @@
 // достатньо same-origin. На GitHub Pages бекенд окремий — Render.
 // Для інших випадків лишається ручний override:
 //   window.ANKI_API_BASE_URL = 'http://127.0.0.1:8000';
-const LOCAL_API_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
-const API_BASE_URL = window.ANKI_API_BASE_URL ||
+var LOCAL_API_HOSTS = (typeof window !== 'undefined' && window.LOCAL_API_HOSTS) || new Set(['127.0.0.1', 'localhost', '::1']);
+var API_BASE_URL = (typeof window !== 'undefined' && window.API_BASE_URL) ||
+  (typeof window !== 'undefined' && window.ANKI_API_BASE_URL) ||
   (typeof location !== 'undefined' && LOCAL_API_HOSTS.has(location.hostname)
     ? ''
     : 'https://anki-gemini-api.onrender.com');
@@ -356,7 +357,7 @@ function closeConfirmModal() {
 }
 
 function getApiUrl(path) {
-  const base = String(API_BASE_URL || '').trim().replace(/\/+$/, '');
+  const base = String((typeof window !== 'undefined' && (window.ANKI_API_BASE_URL || window.API_BASE_URL)) || API_BASE_URL || '').trim().replace(/\/+$/, '');
   const suffix = path.startsWith('/') ? path : `/${path}`;
   return base ? `${base}${suffix}` : suffix;
 }

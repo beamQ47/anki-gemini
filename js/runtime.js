@@ -8,6 +8,24 @@ function escapeHtml(value) {
   })[character]);
 }
 
+var LOCAL_API_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
+var API_BASE_URL = (typeof window !== 'undefined' && window.ANKI_API_BASE_URL) ||
+  (typeof location !== 'undefined' && LOCAL_API_HOSTS.has(location.hostname)
+    ? ''
+    : 'https://anki-gemini-api.onrender.com');
+
+function getApiUrl(path) {
+  const base = String((typeof window !== 'undefined' && (window.ANKI_API_BASE_URL || window.API_BASE_URL)) || API_BASE_URL || '').trim().replace(/\/+$/, '');
+  const suffix = path.startsWith('/') ? path : `/${path}`;
+  return base ? `${base}${suffix}` : suffix;
+}
+
+if (typeof window !== 'undefined') {
+  window.LOCAL_API_HOSTS = LOCAL_API_HOSTS;
+  window.API_BASE_URL = API_BASE_URL;
+  window.getApiUrl = getApiUrl;
+}
+
 function haptic(type = 'light') {
   if (typeof navigator === 'undefined' || typeof navigator.vibrate !== 'function') return;
   if (type === 'error') {

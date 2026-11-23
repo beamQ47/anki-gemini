@@ -58,7 +58,10 @@ window.AnkiAuth = (function () {
 
   function getConfig() {
     if (!configPromise) {
-      configPromise = fetch('/api/config', { headers: { Accept: 'application/json' } })
+      const configUrl = typeof window !== 'undefined' && typeof window.getApiUrl === 'function'
+        ? window.getApiUrl('/api/config')
+        : (typeof getApiUrl === 'function' ? getApiUrl('/api/config') : '/api/config');
+      configPromise = fetch(configUrl, { headers: { Accept: 'application/json' } })
         .then((response) => {
           if (!response.ok) throw new Error('Не вдалося отримати конфігурацію');
           return response.json();
